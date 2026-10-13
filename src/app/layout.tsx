@@ -6,7 +6,7 @@ import { MiniPlayer } from "@/components/mini-player";
 import { PlayerProvider } from "@/lib/player-context";
 import { SubscriptionProvider } from "@/lib/subscription-context";
 import { ToastProvider } from "@/components/toast";
-import { SessionProvider } from "@/components/session-provider";
+import { AuthProvider } from "@/lib/auth-context";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -23,7 +23,7 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <body className={`${inter.className} bg-zinc-950 text-white`}>
-        <SessionProvider>
+        <AuthProvider>
           <SubscriptionProvider>
             <PlayerProvider>
               <ToastProvider>
@@ -37,7 +37,7 @@ export default function RootLayout({
               </ToastProvider>
             </PlayerProvider>
           </SubscriptionProvider>
-        </SessionProvider>
+        </AuthProvider>
       </body>
     </html>
   );
