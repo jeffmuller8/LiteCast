@@ -1,0 +1,372 @@
+"use client";
+
+import { useState, useRef, useEffect } from "react";
+import Image from "next/image";
+import Link from "next/link";
+import { Play, Pause, Download, MoreHorizontal, Bookmark, BookmarkCheck, ListPlus, UserMinus } from "lucide-react";
+import { usePlayer } from "@/lib/player-context";
+import { useSubscriptions } from "@/lib/subscription-context";
+import { useToast } from "@/components/toast";
+
+interface Episode {
+  id: string;
+  podcastId?: string;
+  title: string;
+  description: string;
+  audioUrl: string;
+  duration: number;
+  publishedAt: string;
+  artworkUrl?: string;
+  podcastTitle?: string;
+  podcastArtworkUrl?: string;
+}
+
+interface EpisodeItemProps {
+  episode: Episode;
+  podcastTitle?: string;
+  podcastArtworkUrl?: string;
+  showPodcastInfo?: boolean;
+  progress?: number; // 0-100 percentage
+}
+
+function formatDuration(seconds: number): string {
+  if (!seconds || seconds <= 0) return "0:00";
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = Math.floor(seconds % 60);
+
+  if (hours > 0) {
+    return `${hours}:${minutes.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+  }
+  return `${minutes}:${secs.toString().padStart(2, "0")}`;
+}
+
+function formatDate(dateString: string): string {
+  const date = new Date(dateString);
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+// Strip HTML tags from description (for preview)
+function stripHtml(html: string): string {
+  return html
+    .replace(/<[^>]*>/g, "") // Remove HTML tags
+    .replace(/&nbsp;/g, " ") // Replace &nbsp; with space
+    .replace(/&amp;/g, "&") // Replace &amp; with &
+    .replace(/&lt;/g, "<") // Replace &lt; with <
+    .replace(/&gt;/g, ">") // Replace &gt; with >
+    .replace(/&quot;/g, '"') // Replace &quot; with "
+    .replace(/&#39;/g, "'") // Replace &#39; with '
+    .replace(/\s+/g, " ") // Collapse multiple spaces
+    .trim();
+}
+
+// Sanitize HTML for safe rendering (allows basic formatting)
+function sanitizeHtml(html: string): string {
+  // First decode HTML entities
+  let sanitized = html
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+
+  // Remove potentially dangerous attributes and tags
+  // Keep only safe tags: a, p, br, strong, em, b, i, ul, ol, li, span
+  const allowedTags = ['a', 'p', 'br', 'strong', 'em', 'b', 'i', 'ul', 'ol', 'li', 'span', 'div'];
+
+  // Remove script, style, iframe, and other dangerous tags entirely
+  sanitized = sanitized.replace(/<(script|style|iframe|object|embed|form|input)[^>]*>[\s\S]*?<\/\1>/gi, '');
+  sanitized = sanitized.replace(/<(script|style|iframe|object|embed|form|input)[^>]*\/?>/gi, '');
+
+  // Remove event handlers (onclick, onerror, etc.)
+  sanitized = sanitized.replace(/\s*on\w+\s*=\s*["'][^"']*["']/gi, '');
+  sanitized = sanitized.replace(/\s*on\w+\s*=\s*[^\s>]*/gi, '');
+
+  // Sanitize href attributes - remove javascript: and data: URLs
+  sanitized = sanitized.replace(/href\s*=\s*["']\s*(javascript|data|vbscript):[^"']*["']/gi, 'href="#"');
+
+  // Add target="_blank" and rel="noopener" to all links for safety
+  sanitized = sanitized.replace(/<a\s+([^>]*?)href=/gi, '<a $1target="_blank" rel="noopener noreferrer" href=');
+
+  // Style links with purple color
+  sanitized = sanitized.replace(/<a\s/gi, '<a class="text-purple-400 hover:text-purple-300 underline" ');
+
+  return sanitized;
+}
+
+export function EpisodeItem({
+  episode,
+  podcastTitle,
+  podcastArtworkUrl,
+  showPodcastInfo = false,
+  progress,
+}: EpisodeItemProps) {
+  const { play, currentEpisode, isPlaying, togglePlayPause, addToQueue } = usePlayer();
+  const { unsubscribe, toggleBookmark, isBookmarked } = useSubscriptions();
+  const { showToast } = useToast();
+  const episodeIsBookmarked = isBookmarked(episode.id);
+  const [showMenu, setShowMenu] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [showUnsubscribeModal, setShowUnsubscribeModal] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  const isCurrentEpisode = currentEpisode?.id === episode.id;
+
+  const artworkUrl = episode.podcastArtworkUrl || podcastArtworkUrl || "https://picsum.photos/seed/default/400/400";
+  const title = episode.podcastTitle || podcastTitle || "";
+  const cleanDescription = stripHtml(episode.description);
+
+  // Close menu when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setShowMenu(false);
+      }
+    }
+
+    if (showMenu) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [showMenu]);
+
+  const handlePlay = () => {
+    if (isCurrentEpisode) {
+      togglePlayPause();
+    } else {
+      play({
+        ...episode,
+        podcastTitle: title,
+        podcastArtworkUrl: artworkUrl,
+      });
+    }
+  };
+
+  const handleAddToQueue = () => {
+    const episodeWithInfo = {
+      ...episode,
+      podcastTitle: title,
+      podcastArtworkUrl: artworkUrl,
+    };
+
+    addToQueue(episodeWithInfo);
+    showToast(`Added "${episode.title}" to queue`);
+    setShowMenu(false);
+  };
+
+  const handleUnsubscribeClick = () => {
+    setShowMenu(false);
+    setShowUnsubscribeModal(true);
+  };
+
+  const handleConfirmUnsubscribe = () => {
+    if (episode.podcastId) {
+      unsubscribe(episode.podcastId);
+      showToast(`Unsubscribed from "${title}"`);
+    }
+    setShowUnsubscribeModal(false);
+  };
+
+  return (
+    <div className="group p-4 rounded-xl bg-zinc-800/30 hover:bg-zinc-800/60 transition-colors">
+      <div className="flex gap-4">
+        {/* Artwork */}
+        <div className="relative w-16 h-16 flex-shrink-0">
+          <Image
+            src={episode.artworkUrl || artworkUrl}
+            alt={episode.title}
+            fill
+            className="rounded-lg object-cover"
+          />
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 min-w-0">
+          {showPodcastInfo && episode.podcastId && (
+            <Link
+              href={`/podcast/${encodeURIComponent(episode.podcastId)}`}
+              className="text-xs text-purple-400 font-medium mb-1 hover:text-purple-300 hover:underline transition-colors inline-block"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {title}
+            </Link>
+          )}
+          {showPodcastInfo && !episode.podcastId && (
+            <p className="text-xs text-purple-400 font-medium mb-1">{title}</p>
+          )}
+          <h3 className="font-medium text-white line-clamp-2 group-hover:text-purple-300 transition-colors">
+            {episode.title}
+          </h3>
+          <div className="flex items-center gap-2 mt-1 text-sm text-zinc-400">
+            <span>{formatDate(episode.publishedAt)}</span>
+            <span>•</span>
+            <span>{formatDuration(episode.duration)}</span>
+            {progress !== undefined && (
+              <>
+                <span>•</span>
+                <span className="text-purple-400">{progress}% complete</span>
+              </>
+            )}
+          </div>
+          {progress !== undefined && (
+            <div className="mt-2 h-1 bg-zinc-700 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-purple-500 rounded-full"
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+          )}
+        </div>
+
+        {/* Actions */}
+        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button
+            onClick={() => {
+              toggleBookmark(episode.id);
+              showToast(episodeIsBookmarked ? "Removed from Bookmarks" : "Added to Bookmarks");
+            }}
+            className={`p-2 transition-colors ${
+              episodeIsBookmarked
+                ? "text-purple-400 hover:text-purple-300"
+                : "text-zinc-400 hover:text-white"
+            }`}
+            title={episodeIsBookmarked ? "Remove bookmark" : "Add bookmark"}
+          >
+            {episodeIsBookmarked ? (
+              <BookmarkCheck className="w-5 h-5" />
+            ) : (
+              <Bookmark className="w-5 h-5" />
+            )}
+          </button>
+          <button className="p-2 text-zinc-400 hover:text-white transition-colors">
+            <Download className="w-5 h-5" />
+          </button>
+
+          {/* More menu */}
+          <div className="relative" ref={menuRef}>
+            <button
+              onClick={() => setShowMenu(!showMenu)}
+              className="p-2 text-zinc-400 hover:text-white transition-colors"
+            >
+              <MoreHorizontal className="w-5 h-5" />
+            </button>
+
+            {showMenu && (
+              <div className="absolute right-0 top-full mt-1 w-48 bg-zinc-800 border border-zinc-700 rounded-lg shadow-xl z-50 overflow-hidden">
+                <button
+                  onClick={handleAddToQueue}
+                  className="w-full px-4 py-2.5 text-left text-sm text-zinc-200 hover:bg-zinc-700 flex items-center gap-3 transition-colors"
+                >
+                  <ListPlus className="w-4 h-4" />
+                  Add to Queue
+                </button>
+                {episode.podcastId && (
+                  <button
+                    onClick={handleUnsubscribeClick}
+                    className="w-full px-4 py-2.5 text-left text-sm text-red-400 hover:bg-zinc-700 flex items-center gap-3 transition-colors"
+                  >
+                    <UserMinus className="w-4 h-4" />
+                    Unsubscribe
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Play/Pause button */}
+        <button
+          onClick={handlePlay}
+          className={`flex-shrink-0 w-12 h-12 rounded-full flex items-center justify-center transition-all ${
+            isCurrentEpisode && isPlaying
+              ? "bg-purple-600 text-white"
+              : "bg-white text-black hover:scale-105"
+          }`}
+        >
+          {isCurrentEpisode && isPlaying ? (
+            <Pause className="w-5 h-5" />
+          ) : (
+            <Play className="w-5 h-5 ml-0.5" />
+          )}
+        </button>
+      </div>
+
+      {/* Description - clickable to expand */}
+      {!isExpanded ? (
+        <>
+          <p
+            onClick={() => setIsExpanded(true)}
+            className="mt-3 text-sm text-zinc-400 cursor-pointer hover:text-zinc-300 transition-colors line-clamp-2"
+          >
+            {cleanDescription}
+          </p>
+          {cleanDescription.length > 150 && (
+            <button
+              onClick={() => setIsExpanded(true)}
+              className="text-xs text-purple-400 hover:text-purple-300 mt-1"
+            >
+              Show more
+            </button>
+          )}
+        </>
+      ) : (
+        <>
+          <div
+            onClick={(e) => {
+              // Don't collapse if clicking a link
+              if ((e.target as HTMLElement).tagName !== 'A') {
+                setIsExpanded(false);
+              }
+            }}
+            className="mt-3 text-sm text-zinc-400 cursor-pointer hover:text-zinc-300 transition-colors [&_p]:my-2 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:ml-4 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:ml-4 [&_li]:my-1 [&_br]:my-1 [&_strong]:font-semibold [&_em]:italic"
+            dangerouslySetInnerHTML={{ __html: sanitizeHtml(episode.description) }}
+          />
+          <button
+            onClick={() => setIsExpanded(false)}
+            className="text-xs text-purple-400 hover:text-purple-300 mt-1"
+          >
+            Show less
+          </button>
+        </>
+      )}
+
+      {/* Unsubscribe Confirmation Modal */}
+      {showUnsubscribeModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => setShowUnsubscribeModal(false)}
+          />
+
+          {/* Modal */}
+          <div className="relative bg-zinc-900 border border-zinc-700 rounded-xl p-6 max-w-md w-full mx-4 shadow-2xl">
+            <h3 className="text-lg font-semibold text-white mb-2">
+              Unsubscribe from podcast?
+            </h3>
+            <p className="text-zinc-400 text-sm mb-6">
+              Are you sure you want to unsubscribe from <span className="text-white font-medium">{title}</span>?
+              This will remove all episodes from your library.
+            </p>
+
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setShowUnsubscribeModal(false)}
+                className="px-4 py-2 text-sm font-medium text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmUnsubscribe}
+                className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-500 rounded-lg transition-colors"
+              >
+                Unsubscribe
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
