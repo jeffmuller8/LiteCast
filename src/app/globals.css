@@ -34,3 +34,106 @@ html, body {
 .animate-slide-in {
   animation: slide-in 0.3s ease-out;
 }
+
+/* Nav border draw animation - draws from bottom corners meeting at top */
+@keyframes drawBorderFromBottom {
+  0% {
+    clip-path: polygon(
+      0% 100%, 0% 100%,
+      0% 100%, 100% 100%,
+      100% 100%, 100% 100%
+    );
+  }
+  100% {
+    clip-path: polygon(
+      0% 100%, 0% 0%,
+      50% 0%, 50% 0%,
+      100% 0%, 100% 100%
+    );
+  }
+}
+
+.nav-border-draw {
+  animation: navBorderDraw 0.4s ease-out forwards;
+}
+
+@keyframes navBorderDraw {
+  0% {
+    stroke-dashoffset: 200;
+  }
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* Page transition animations */
+.page-enter {
+  animation: fadeIn 0.3s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Staggered slide down animation for lists */
+.stagger-item {
+  opacity: 0;
+  animation: slideDownFade 0.4s ease-out forwards;
+}
+
+@keyframes slideDownFade {
+  from {
+    opacity: 0;
+    transform: translateY(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Pop in animation for podcast cards */
+.pop-in {
+  animation: popInScale 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+@keyframes popInScale {
+  from {
+    opacity: 0;
+    transform: scale(1.15);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Safe area for mobile devices with notches */
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
+.safe-area-top {
+  padding-top: env(safe-area-inset-top, 0);
+}
+
+/* Slide up animation for drawers */
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-slideUp {
+  animation: slideUp 0.3s ease-out;
+}

@@ -253,13 +253,13 @@ export default function SearchPage() {
   const showPartialSuggestions = showSuggestions && query.length > 0 && filteredSuggestions.length > 0 && !isUrl(query);
 
   return (
-    <div className="p-8">
+    <div className="p-4 md:p-8 animate-fadeIn">
       {/* Search input */}
-      <div className="relative mb-8">
+      <div className="relative mb-6 md:mb-8">
         {isRssFeed ? (
           <Rss className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-orange-400" />
         ) : (
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-400" />
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-zinc-400" />
         )}
         <input
           ref={inputRef}
@@ -269,10 +269,10 @@ export default function SearchPage() {
           onFocus={() => setShowSuggestions(true)}
           onKeyDown={handleKeyDown}
           placeholder="Search podcasts or paste RSS feed URL..."
-          className={`w-full pl-12 pr-4 py-3 bg-zinc-800 border rounded-xl text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:border-transparent ${
+          className={`w-full pl-12 pr-4 py-3 bg-light-surface dark:bg-zinc-800 border rounded-xl text-light-text dark:text-white placeholder:text-gray-400 dark:placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:border-transparent ${
             isRssFeed
               ? "border-orange-500/50 focus:ring-orange-500"
-              : "border-zinc-700 focus:ring-purple-500"
+              : "border-gray-200 dark:border-zinc-700 focus:ring-light-primary dark:focus:ring-sky-500"
           }`}
         />
 
@@ -280,7 +280,7 @@ export default function SearchPage() {
         {(showSuggestionsPanel || showPartialSuggestions) && (
           <div
             ref={suggestionsRef}
-            className="absolute top-full left-0 right-0 mt-2 bg-zinc-800 border border-zinc-700 rounded-xl shadow-xl z-50 overflow-hidden"
+            className="absolute top-full left-0 right-0 mt-2 bg-white dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded-xl shadow-xl z-50 overflow-hidden"
           >
             {/* Partial match suggestions */}
             {showPartialSuggestions && (
@@ -289,13 +289,13 @@ export default function SearchPage() {
                   <button
                     key={suggestion}
                     onClick={() => handleSuggestionClick(suggestion)}
-                    className="w-full px-3 py-2 text-left text-sm text-zinc-200 hover:bg-zinc-700 rounded-lg flex items-center gap-3 transition-colors"
+                    className="w-full px-3 py-2 text-left text-sm text-light-text dark:text-zinc-200 hover:bg-gray-100 dark:hover:bg-zinc-700 rounded-lg flex items-center gap-3 transition-colors"
                   >
-                    <Search className="w-4 h-4 text-zinc-500" />
+                    <Search className="w-4 h-4 text-gray-400 dark:text-zinc-500" />
                     <span>
                       {suggestion.split(new RegExp(`(${query})`, "gi")).map((part, i) =>
                         part.toLowerCase() === query.toLowerCase() ? (
-                          <span key={i} className="text-purple-400 font-medium">{part}</span>
+                          <span key={i} className="text-light-primary dark:text-sky-400 font-medium">{part}</span>
                         ) : (
                           <span key={i}>{part}</span>
                         )
@@ -311,8 +311,8 @@ export default function SearchPage() {
               <>
                 {/* Recent searches */}
                 {recentSearches.length > 0 && (
-                  <div className="p-2 border-b border-zinc-700">
-                    <p className="px-3 py-1 text-xs font-medium text-zinc-500 flex items-center gap-2">
+                  <div className="p-2 border-b border-gray-200 dark:border-zinc-700">
+                    <p className="px-3 py-1 text-xs font-medium text-gray-500 dark:text-zinc-500 flex items-center gap-2">
                       <Clock className="w-3 h-3" />
                       Recent Searches
                     </p>
@@ -320,9 +320,9 @@ export default function SearchPage() {
                       <button
                         key={search}
                         onClick={() => handleSuggestionClick(search)}
-                        className="w-full px-3 py-2 text-left text-sm text-zinc-200 hover:bg-zinc-700 rounded-lg flex items-center gap-3 transition-colors"
+                        className="w-full px-3 py-2 text-left text-sm text-light-text dark:text-zinc-200 hover:bg-gray-100 dark:hover:bg-zinc-700 rounded-lg flex items-center gap-3 transition-colors"
                       >
-                        <Clock className="w-4 h-4 text-zinc-500" />
+                        <Clock className="w-4 h-4 text-gray-400 dark:text-zinc-500" />
                         {search}
                       </button>
                     ))}
@@ -331,7 +331,7 @@ export default function SearchPage() {
 
                 {/* Trending/Popular */}
                 <div className="p-2">
-                  <p className="px-3 py-1 text-xs font-medium text-zinc-500 flex items-center gap-2">
+                  <p className="px-3 py-1 text-xs font-medium text-gray-500 dark:text-zinc-500 flex items-center gap-2">
                     <TrendingUp className="w-3 h-3" />
                     Popular Searches
                   </p>
@@ -340,7 +340,7 @@ export default function SearchPage() {
                       <button
                         key={search}
                         onClick={() => handleSuggestionClick(search)}
-                        className="px-3 py-1.5 text-sm text-zinc-300 bg-zinc-700/50 hover:bg-zinc-700 rounded-full transition-colors"
+                        className="px-3 py-1.5 text-sm text-gray-600 dark:text-zinc-300 bg-gray-100 dark:bg-zinc-700/50 hover:bg-gray-200 dark:hover:bg-zinc-700 rounded-full transition-colors"
                       >
                         {search}
                       </button>
@@ -364,34 +364,34 @@ export default function SearchPage() {
       {/* Results */}
       {query.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-center">
-          <Search className="w-16 h-16 text-zinc-700 mb-4" />
-          <h2 className="text-xl font-semibold text-zinc-400">
+          <Search className="w-16 h-16 text-gray-300 dark:text-zinc-700 mb-4" />
+          <h2 className="text-xl font-semibold text-gray-500 dark:text-zinc-400">
             Search for podcasts
           </h2>
-          <p className="text-zinc-500 mt-2 max-w-md">
+          <p className="text-gray-400 dark:text-zinc-500 mt-2 max-w-md">
             Search the Podcast Index directory or paste an RSS feed URL to subscribe directly
           </p>
         </div>
       ) : isLoading ? (
         <div className="flex flex-col items-center justify-center py-20">
-          <Loader2 className="w-8 h-8 text-purple-500 animate-spin" />
-          <p className="text-zinc-400 mt-4">Searching...</p>
+          <Loader2 className="w-8 h-8 text-light-primary dark:text-sky-500 animate-spin" />
+          <p className="text-gray-500 dark:text-zinc-400 mt-4">Searching...</p>
         </div>
       ) : error ? (
         <div className="flex flex-col items-center justify-center py-20 text-center">
-          <h2 className="text-xl font-semibold text-red-400">
+          <h2 className="text-xl font-semibold text-red-500 dark:text-red-400">
             {error}
           </h2>
-          <p className="text-zinc-500 mt-2">
+          <p className="text-gray-500 dark:text-zinc-500 mt-2">
             Make sure API keys are configured in .env.local
           </p>
         </div>
       ) : results.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-center">
-          <h2 className="text-xl font-semibold text-zinc-400">
+          <h2 className="text-xl font-semibold text-gray-500 dark:text-zinc-400">
             No results found
           </h2>
-          <p className="text-zinc-500 mt-2">
+          <p className="text-gray-400 dark:text-zinc-500 mt-2">
             Try a different search term
           </p>
         </div>
@@ -401,7 +401,7 @@ export default function SearchPage() {
             <div
               key={podcast.id}
               onClick={() => router.push(`/podcast/${encodeURIComponent(String(podcast.id))}`)}
-              className="flex gap-4 p-4 rounded-xl bg-zinc-800/50 hover:bg-zinc-800 transition-colors group cursor-pointer"
+              className="flex gap-4 p-4 rounded-xl bg-light-surface/50 dark:bg-zinc-800/50 hover:bg-light-surface dark:hover:bg-zinc-800 transition-colors group cursor-pointer"
             >
               {podcast.image ? (
                 <Image
@@ -413,21 +413,21 @@ export default function SearchPage() {
                   unoptimized
                 />
               ) : (
-                <div className="w-20 h-20 bg-zinc-700 rounded-lg flex items-center justify-center">
-                  <Search className="w-8 h-8 text-zinc-500" />
+                <div className="w-20 h-20 bg-gray-200 dark:bg-zinc-700 rounded-lg flex items-center justify-center">
+                  <Search className="w-8 h-8 text-gray-400 dark:text-zinc-500" />
                 </div>
               )}
               <div className="flex-1 min-w-0">
-                <h3 className="font-semibold text-white group-hover:text-purple-400 transition-colors">
+                <h3 className="font-semibold text-light-text dark:text-white group-hover:text-light-primary dark:group-hover:text-sky-400 transition-colors">
                   {podcast.title}
                 </h3>
-                <p className="text-sm text-zinc-400 mt-1">
+                <p className="text-sm text-gray-500 dark:text-zinc-400 mt-1">
                   {podcast.author}
                   {podcast.episodeCount && (
-                    <span className="text-zinc-500"> • {podcast.episodeCount} episodes</span>
+                    <span className="text-gray-400 dark:text-zinc-500"> • {podcast.episodeCount} episodes</span>
                   )}
                 </p>
-                <p className="text-sm text-zinc-500 mt-2 line-clamp-2">
+                <p className="text-sm text-gray-400 dark:text-zinc-500 mt-2 line-clamp-2">
                   {podcast.description}
                 </p>
               </div>
@@ -439,8 +439,8 @@ export default function SearchPage() {
                 disabled={isSubscribed(String(podcast.id)) || subscribingIds.has(podcast.id)}
                 className={`flex-shrink-0 w-12 h-12 rounded-full flex items-center justify-center transition-all ${
                   isSubscribed(String(podcast.id))
-                    ? "bg-zinc-700 text-zinc-400 cursor-default"
-                    : "bg-purple-600 text-white hover:bg-purple-500"
+                    ? "bg-gray-200 dark:bg-zinc-700 text-gray-400 dark:text-zinc-400 cursor-default"
+                    : "bg-light-primary dark:bg-sky-600 text-white hover:bg-light-primary/90 dark:hover:bg-sky-500"
                 }`}
               >
                 {subscribingIds.has(podcast.id) ? (

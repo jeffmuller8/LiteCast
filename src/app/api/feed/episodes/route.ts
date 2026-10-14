@@ -22,6 +22,7 @@ function getPodcastIndexHeaders() {
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const url = searchParams.get("url");
+  const limitParam = searchParams.get("limit");
 
   if (!url) {
     return NextResponse.json({ error: "URL is required" }, { status: 400 });
@@ -34,10 +35,13 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  // Determine max episodes to fetch (default 50, "all" = 1000)
+  const maxEpisodes = limitParam === "all" ? 1000 : (parseInt(limitParam || "50") || 50);
+
   try {
     // Use Podcast Index API to get episodes
     const response = await fetch(
-      `https://api.podcastindex.org/api/1.0/episodes/byfeedurl?url=${encodeURIComponent(url)}&max=50&fullText=true`,
+      `https://api.podcastindex.org/api/1.0/episodes/byfeedurl?url=${encodeURIComponent(url)}&max=${maxEpisodes}&fullText=true`,
       {
         headers: getPodcastIndexHeaders(),
       }

@@ -12,7 +12,7 @@ export default function BookmarksPage() {
   // Show loading while hydrating from localStorage
   if (!isHydrated) {
     return (
-      <div className="p-8">
+      <div className="p-4 md:p-8">
         <div className="animate-pulse">
           <div className="h-8 w-48 bg-zinc-800 rounded mb-6"></div>
           <div className="space-y-3">
@@ -26,10 +26,10 @@ export default function BookmarksPage() {
   }
 
   return (
-    <div className="p-8">
+    <div className="p-4 md:p-8 animate-fadeIn">
       <div className="flex items-center gap-3 mb-6">
-        <Bookmark className="w-8 h-8 text-purple-400" />
-        <h1 className="text-2xl font-bold">Bookmarks</h1>
+        <Bookmark className="w-6 h-6 md:w-8 md:h-8 text-light-gold dark:text-yellow-500" />
+        <h1 className="text-xl md:text-2xl font-bold">Bookmarks</h1>
         {bookmarkedEpisodes.length > 0 && (
           <span className="text-zinc-400">({bookmarkedEpisodes.length})</span>
         )}
@@ -56,7 +56,7 @@ export default function BookmarksPage() {
           </p>
           <Link
             href="/"
-            className="mt-6 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-500 transition-colors"
+            className="mt-6 px-4 py-2 bg-light-primary dark:bg-sky-600 text-white rounded-lg hover:bg-light-primary/90 dark:hover:bg-sky-500 transition-colors"
           >
             Browse Episodes
           </Link>

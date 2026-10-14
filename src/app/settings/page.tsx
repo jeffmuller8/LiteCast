@@ -1,13 +1,15 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Settings, Upload, Download, FileText, Check, AlertCircle } from "lucide-react";
+import { Settings, Upload, Download, FileText, Check, AlertCircle, Sun, Moon } from "lucide-react";
 import { useSubscriptions } from "@/lib/subscription-context";
 import { useToast } from "@/components/toast";
+import { useTheme } from "@/lib/theme-context";
 
 export default function SettingsPage() {
   const { podcasts, subscribe } = useSubscriptions();
   const { showToast } = useToast();
+  const { theme, setTheme } = useTheme();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [importStatus, setImportStatus] = useState<{
@@ -119,17 +121,54 @@ export default function SettingsPage() {
   };
 
   return (
-    <div className="p-8">
+    <div className="p-8 animate-fadeIn">
       <div className="flex items-center gap-3 mb-8">
-        <Settings className="w-8 h-8 text-purple-400" />
+        <Settings className="w-8 h-8 text-light-primary dark:text-sky-400" />
         <h1 className="text-2xl font-bold">Settings</h1>
       </div>
+
+      {/* Appearance Section */}
+      <section className="max-w-2xl mb-8">
+        <h2 className="text-lg font-semibold mb-4">Appearance</h2>
+        <div className="bg-light-surface dark:bg-zinc-800/50 rounded-xl p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="font-medium text-light-text dark:text-white">Theme</p>
+              <p className="text-sm text-gray-500 dark:text-zinc-400">Choose light or dark mode</p>
+            </div>
+            <div className="flex items-center bg-gray-200 dark:bg-zinc-900 rounded-lg p-1">
+              <button
+                onClick={() => setTheme("light")}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm transition-colors ${
+                  theme === "light"
+                    ? "bg-light-primary dark:bg-sky-600 text-white"
+                    : "text-gray-600 dark:text-zinc-400 hover:text-light-text dark:hover:text-white"
+                }`}
+              >
+                <Sun className="w-4 h-4" />
+                Light
+              </button>
+              <button
+                onClick={() => setTheme("dark")}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm transition-colors ${
+                  theme === "dark"
+                    ? "bg-light-primary dark:bg-sky-600 text-white"
+                    : "text-gray-600 dark:text-zinc-400 hover:text-light-text dark:hover:text-white"
+                }`}
+              >
+                <Moon className="w-4 h-4" />
+                Dark
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
 
       {/* Import/Export Section */}
       <section className="max-w-2xl">
         <h2 className="text-lg font-semibold mb-4">Import & Export</h2>
-        <div className="bg-zinc-800/50 rounded-xl p-6 space-y-6">
-          <p className="text-zinc-400 text-sm">
+        <div className="bg-light-surface dark:bg-zinc-800/50 rounded-xl p-6 space-y-6">
+          <p className="text-gray-500 dark:text-zinc-400 text-sm">
             Import or export your podcast subscriptions using OPML format. This is compatible with most podcast apps.
           </p>
 
@@ -138,7 +177,7 @@ export default function SettingsPage() {
             <button
               onClick={handleExport}
               disabled={podcasts.length === 0}
-              className="flex items-center gap-2 px-5 py-2.5 bg-purple-600 text-white rounded-lg font-medium hover:bg-purple-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex items-center gap-2 px-5 py-2.5 bg-light-primary dark:bg-sky-600 text-white rounded-lg font-medium hover:bg-light-primary/90 dark:hover:bg-sky-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Download className="w-5 h-5" />
               Export OPML
@@ -148,7 +187,7 @@ export default function SettingsPage() {
             <button
               onClick={handleImportClick}
               disabled={isImporting}
-              className="flex items-center gap-2 px-5 py-2.5 border border-zinc-600 text-zinc-300 rounded-lg font-medium hover:border-purple-500 hover:text-purple-400 hover:bg-purple-500/10 transition-colors disabled:opacity-50"
+              className="flex items-center gap-2 px-5 py-2.5 border border-gray-300 dark:border-zinc-600 text-gray-600 dark:text-zinc-300 rounded-lg font-medium hover:border-light-primary dark:hover:border-sky-500 hover:text-light-primary dark:hover:text-sky-400 hover:bg-light-primary/10 dark:hover:bg-sky-500/10 transition-colors disabled:opacity-50"
             >
               <Upload className="w-5 h-5" />
               {isImporting ? "Importing..." : "Import OPML"}
@@ -164,7 +203,7 @@ export default function SettingsPage() {
           </div>
 
           {/* Current subscription count */}
-          <div className="flex items-center gap-2 text-sm text-zinc-500">
+          <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-zinc-500">
             <FileText className="w-4 h-4" />
             <span>
               {podcasts.length} podcast{podcasts.length === 1 ? "" : "s"} in your library
@@ -173,25 +212,25 @@ export default function SettingsPage() {
 
           {/* Import Status */}
           {importStatus && (
-            <div className="bg-zinc-900 rounded-lg p-4 space-y-2">
+            <div className="bg-gray-100 dark:bg-zinc-900 rounded-lg p-4 space-y-2">
               <div className="flex items-center gap-2 text-sm">
-                <Check className="w-4 h-4 text-green-400" />
-                <span className="text-zinc-300">
+                <Check className="w-4 h-4 text-green-500 dark:text-green-400" />
+                <span className="text-light-text dark:text-zinc-300">
                   Imported: {importStatus.imported}
                 </span>
               </div>
               {importStatus.skipped > 0 && (
                 <div className="flex items-center gap-2 text-sm">
-                  <AlertCircle className="w-4 h-4 text-yellow-400" />
-                  <span className="text-zinc-400">
+                  <AlertCircle className="w-4 h-4 text-yellow-500 dark:text-yellow-400" />
+                  <span className="text-gray-600 dark:text-zinc-400">
                     Skipped (already subscribed): {importStatus.skipped}
                   </span>
                 </div>
               )}
               {importStatus.failed > 0 && (
                 <div className="flex items-center gap-2 text-sm">
-                  <AlertCircle className="w-4 h-4 text-red-400" />
-                  <span className="text-zinc-400">
+                  <AlertCircle className="w-4 h-4 text-red-500 dark:text-red-400" />
+                  <span className="text-gray-600 dark:text-zinc-400">
                     Failed: {importStatus.failed}
                   </span>
                 </div>

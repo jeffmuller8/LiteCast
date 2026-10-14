@@ -1,6 +1,9 @@
 "use client";
 
-import { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef } from "react";
+import { doc, setDoc, getDoc, onSnapshot } from "firebase/firestore";
+import { db } from "./firebase";
+import { useAuth } from "./auth-context";
 
 export interface Podcast {
   id: string;
@@ -30,6 +33,13 @@ export interface PlaybackProgress {
   completed: boolean;
 }
 
+interface UserData {
+  podcasts: Podcast[];
+  episodes: Episode[];
+  playbackProgress: PlaybackProgress[];
+  bookmarkedEpisodeIds: string[];
+}
+
 interface SubscriptionContextType {
   podcasts: Podcast[];
   episodes: Episode[];
@@ -45,63 +55,313 @@ interface SubscriptionContextType {
   updateProgress: (episodeId: string, currentTime: number, completed: boolean) => void;
   toggleBookmark: (episodeId: string) => void;
   isBookmarked: (episodeId: string) => boolean;
+  fetchAllEpisodes: (podcastId: string) => Promise<{ added: number; total: number }>;
 }
 
 const SubscriptionContext = createContext<SubscriptionContextType | null>(null);
 
 export function SubscriptionProvider({ children }: { children: ReactNode }) {
+  const { user, loading: authLoading } = useAuth();
   const [podcasts, setPodcasts] = useState<Podcast[]>([]);
   const [episodes, setEpisodes] = useState<Episode[]>([]);
   const [playbackProgress, setPlaybackProgress] = useState<PlaybackProgress[]>([]);
   const [bookmarkedEpisodeIds, setBookmarkedEpisodeIds] = useState<string[]>([]);
   const [isHydrated, setIsHydrated] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const isSyncingRef = useRef(false);
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const firestoreErrorCount = useRef(0);
 
-  // Load from localStorage on mount
+  // Save to Firestore when user is logged in
+  const saveToFirestore = useCallback(async (data: UserData) => {
+    if (!user || isSyncing) return;
+
+    // Stop trying after too many errors (e.g., document too large)
+    if (firestoreErrorCount.current >= 5) {
+      console.warn("Firestore saves disabled due to repeated errors. Using localStorage only.");
+      return;
+    }
+
+    try {
+      // Aggressively reduce episode data for Firestore (1MB limit)
+      // Only keep essential fields, remove descriptions entirely for cloud storage
+      const minimalEpisodes = data.episodes.map(ep => ({
+        id: ep.id,
+        podcastId: ep.podcastId,
+        title: ep.title,
+        description: "", // Don't store descriptions in Firestore - too large
+        audioUrl: ep.audioUrl,
+        duration: ep.duration,
+        publishedAt: ep.publishedAt,
+        podcastTitle: ep.podcastTitle,
+        podcastArtworkUrl: ep.podcastArtworkUrl,
+        // Omit transcriptUrl to save space
+      }));
+
+      // Limit to most recent 100 episodes per podcast to avoid size issues
+      const podcastEpisodeCounts = new Map<string, number>();
+      const limitedEpisodes = minimalEpisodes.filter(ep => {
+        const count = podcastEpisodeCounts.get(ep.podcastId) || 0;
+        if (count < 100) {
+          podcastEpisodeCounts.set(ep.podcastId, count + 1);
+          return true;
+        }
+        return false;
+      });
+
+      await setDoc(doc(db, "users", user.uid), {
+        podcasts: data.podcasts,
+        episodes: limitedEpisodes,
+        playbackProgress: data.playbackProgress,
+        bookmarkedEpisodeIds: data.bookmarkedEpisodeIds,
+        updatedAt: new Date().toISOString(),
+      });
+
+      // Reset error count on success
+      firestoreErrorCount.current = 0;
+      console.log(`Firestore save successful: ${data.podcasts.length} podcasts, ${limitedEpisodes.length} episodes`);
+    } catch (error: any) {
+      console.error("Error saving to Firestore:", error?.message || error);
+      firestoreErrorCount.current++;
+
+      // If it's a size error, try saving just podcasts without episodes
+      if (error?.message?.includes("size") || firestoreErrorCount.current >= 3) {
+        try {
+          await setDoc(doc(db, "users", user.uid), {
+            podcasts: data.podcasts,
+            episodes: [], // Skip episodes if document too large
+            playbackProgress: data.playbackProgress,
+            bookmarkedEpisodeIds: data.bookmarkedEpisodeIds,
+            updatedAt: new Date().toISOString(),
+            note: "Episodes stored locally only due to size limits",
+          });
+          console.log("Firestore fallback save (podcasts only) successful");
+        } catch (fallbackError) {
+          console.error("Firestore fallback save also failed:", fallbackError);
+        }
+      }
+    }
+  }, [user, isSyncing]);
+
+  // Load data from Firestore or localStorage
   useEffect(() => {
-    const savedPodcasts = localStorage.getItem("litecast-podcasts");
-    const savedEpisodes = localStorage.getItem("litecast-episodes");
-    const savedProgress = localStorage.getItem("litecast-progress");
-    const savedBookmarks = localStorage.getItem("litecast-bookmarks");
+    // Don't load until auth has finished initializing
+    if (authLoading) return;
 
-    if (savedPodcasts) setPodcasts(JSON.parse(savedPodcasts));
-    if (savedEpisodes) setEpisodes(JSON.parse(savedEpisodes));
-    if (savedProgress) setPlaybackProgress(JSON.parse(savedProgress));
-    if (savedBookmarks) setBookmarkedEpisodeIds(JSON.parse(savedBookmarks));
+    const loadData = async () => {
+      if (user) {
+        // User is logged in - load from Firestore and merge with localStorage
+        setIsSyncing(true);
+        isSyncingRef.current = true;
+        try {
+          const docRef = doc(db, "users", user.uid);
+          const docSnap = await getDoc(docRef);
 
-    setIsHydrated(true);
-  }, []);
+          // Always check localStorage for potentially newer data
+          const savedPodcasts = localStorage.getItem("litecast-podcasts");
+          const savedEpisodes = localStorage.getItem("litecast-episodes");
+          const savedProgress = localStorage.getItem("litecast-progress");
+          const savedBookmarks = localStorage.getItem("litecast-bookmarks");
 
-  // Save to localStorage when state changes (only after hydration)
+          const localData: UserData = {
+            podcasts: savedPodcasts ? JSON.parse(savedPodcasts) : [],
+            episodes: savedEpisodes ? JSON.parse(savedEpisodes) : [],
+            playbackProgress: savedProgress ? JSON.parse(savedProgress) : [],
+            bookmarkedEpisodeIds: savedBookmarks ? JSON.parse(savedBookmarks) : [],
+          };
+
+          if (docSnap.exists()) {
+            const cloudData = docSnap.data() as UserData;
+
+            // Merge strategy: combine podcasts from both sources, prefer local episodes
+            // (localStorage has full episode data, Firestore has limited data due to size)
+            const cloudPodcasts = cloudData.podcasts || [];
+            const localPodcastIds = new Set(localData.podcasts.map(p => p.id));
+            const cloudOnlyPodcasts = cloudPodcasts.filter(p => !localPodcastIds.has(p.id));
+
+            // Merge podcasts (local + any cloud-only podcasts)
+            const mergedPodcasts = [...localData.podcasts, ...cloudOnlyPodcasts];
+
+            // For episodes: always prefer localStorage (has full descriptions)
+            // Only use cloud episodes for podcasts we don't have locally
+            const localEpisodePodcastIds = new Set(localData.episodes.map(e => e.podcastId));
+            const cloudOnlyEpisodes = (cloudData.episodes || []).filter(
+              e => !localEpisodePodcastIds.has(e.podcastId)
+            );
+            const mergedEpisodes = [...localData.episodes, ...cloudOnlyEpisodes];
+
+            // Merge playback progress (union, prefer local for conflicts)
+            const localProgressIds = new Set(localData.playbackProgress.map(p => p.episodeId));
+            const cloudOnlyProgress = (cloudData.playbackProgress || []).filter(
+              p => !localProgressIds.has(p.episodeId)
+            );
+            const mergedProgress = [...localData.playbackProgress, ...cloudOnlyProgress];
+
+            // Merge bookmarks (union)
+            const mergedBookmarks = [...new Set([
+              ...localData.bookmarkedEpisodeIds,
+              ...(cloudData.bookmarkedEpisodeIds || [])
+            ])];
+
+            setPodcasts(mergedPodcasts);
+            setEpisodes(mergedEpisodes);
+            setPlaybackProgress(mergedProgress);
+            setBookmarkedEpisodeIds(mergedBookmarks);
+
+            console.log(`Loaded: ${mergedPodcasts.length} podcasts, ${mergedEpisodes.length} episodes`);
+          } else {
+            // No cloud data - use localStorage
+            setPodcasts(localData.podcasts);
+            setEpisodes(localData.episodes);
+            setPlaybackProgress(localData.playbackProgress);
+            setBookmarkedEpisodeIds(localData.bookmarkedEpisodeIds);
+
+            console.log(`Loaded from localStorage: ${localData.podcasts.length} podcasts, ${localData.episodes.length} episodes`);
+          }
+        } catch (error) {
+          console.error("Error loading from Firestore:", error);
+          // On error, fall back to localStorage
+          const savedPodcasts = localStorage.getItem("litecast-podcasts");
+          const savedEpisodes = localStorage.getItem("litecast-episodes");
+          const savedProgress = localStorage.getItem("litecast-progress");
+          const savedBookmarks = localStorage.getItem("litecast-bookmarks");
+
+          if (savedPodcasts) setPodcasts(JSON.parse(savedPodcasts));
+          if (savedEpisodes) setEpisodes(JSON.parse(savedEpisodes));
+          if (savedProgress) setPlaybackProgress(JSON.parse(savedProgress));
+          if (savedBookmarks) setBookmarkedEpisodeIds(JSON.parse(savedBookmarks));
+        } finally {
+          setIsSyncing(false);
+          isSyncingRef.current = false;
+        }
+      } else {
+        // Not logged in - use localStorage
+        const savedPodcasts = localStorage.getItem("litecast-podcasts");
+        const savedEpisodes = localStorage.getItem("litecast-episodes");
+        const savedProgress = localStorage.getItem("litecast-progress");
+        const savedBookmarks = localStorage.getItem("litecast-bookmarks");
+
+        if (savedPodcasts) setPodcasts(JSON.parse(savedPodcasts));
+        if (savedEpisodes) setEpisodes(JSON.parse(savedEpisodes));
+        if (savedProgress) setPlaybackProgress(JSON.parse(savedProgress));
+        if (savedBookmarks) setBookmarkedEpisodeIds(JSON.parse(savedBookmarks));
+      }
+
+      setIsHydrated(true);
+    };
+
+    loadData();
+  }, [user, authLoading]);
+
+  // Listen for real-time updates from Firestore (for cross-device sync)
   useEffect(() => {
-    if (isHydrated) {
+    if (!user) return;
+
+    const unsubscribe = onSnapshot(doc(db, "users", user.uid), (docSnap) => {
+      // Don't update state during initial sync to avoid overwriting local data
+      if (docSnap.exists() && !isSyncingRef.current) {
+        const cloudData = docSnap.data() as UserData;
+
+        // Only update if cloud has MORE podcasts than local (indicates sync from another device)
+        // This prevents cloud data (with limited episodes) from overwriting local data
+        setPodcasts(currentPodcasts => {
+          if ((cloudData.podcasts?.length || 0) > currentPodcasts.length) {
+            // Cloud has more podcasts - merge them
+            const localIds = new Set(currentPodcasts.map(p => p.id));
+            const newPodcasts = (cloudData.podcasts || []).filter(p => !localIds.has(p.id));
+            return [...currentPodcasts, ...newPodcasts];
+          }
+          return currentPodcasts;
+        });
+
+        // Don't overwrite episodes from cloud (local has full data)
+        // Only add episodes for new podcasts we don't have
+        setEpisodes(currentEpisodes => {
+          const localPodcastIds = new Set(currentEpisodes.map(e => e.podcastId));
+          const newEpisodes = (cloudData.episodes || []).filter(
+            e => !localPodcastIds.has(e.podcastId)
+          );
+          if (newEpisodes.length > 0) {
+            return [...currentEpisodes, ...newEpisodes];
+          }
+          return currentEpisodes;
+        });
+
+        // Merge playback progress (cloud may have progress from other devices)
+        setPlaybackProgress(currentProgress => {
+          const localIds = new Set(currentProgress.map(p => p.episodeId));
+          const newProgress = (cloudData.playbackProgress || []).filter(
+            p => !localIds.has(p.episodeId)
+          );
+          if (newProgress.length > 0) {
+            return [...currentProgress, ...newProgress];
+          }
+          return currentProgress;
+        });
+
+        // Merge bookmarks
+        setBookmarkedEpisodeIds(currentBookmarks => {
+          const merged = new Set([...currentBookmarks, ...(cloudData.bookmarkedEpisodeIds || [])]);
+          if (merged.size > currentBookmarks.length) {
+            return [...merged];
+          }
+          return currentBookmarks;
+        });
+      }
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // Save to storage when state changes
+  useEffect(() => {
+    // Don't save until hydrated and auth is done loading
+    if (!isHydrated || authLoading) return;
+
+    const data: UserData = { podcasts, episodes, playbackProgress, bookmarkedEpisodeIds };
+
+    // Always save to localStorage as immediate backup
+    try {
       localStorage.setItem("litecast-podcasts", JSON.stringify(podcasts));
-    }
-  }, [podcasts, isHydrated]);
-
-  useEffect(() => {
-    if (isHydrated) {
       localStorage.setItem("litecast-episodes", JSON.stringify(episodes));
-    }
-  }, [episodes, isHydrated]);
-
-  useEffect(() => {
-    if (isHydrated) {
       localStorage.setItem("litecast-progress", JSON.stringify(playbackProgress));
-    }
-  }, [playbackProgress, isHydrated]);
-
-  useEffect(() => {
-    if (isHydrated) {
       localStorage.setItem("litecast-bookmarks", JSON.stringify(bookmarkedEpisodeIds));
+      console.log(`LocalStorage saved: ${podcasts.length} podcasts, ${episodes.length} episodes`);
+    } catch (error: any) {
+      console.error("LocalStorage save failed:", error?.message || error);
+      // If localStorage is full, try to save at least the podcasts
+      if (error?.name === "QuotaExceededError") {
+        try {
+          localStorage.setItem("litecast-podcasts", JSON.stringify(podcasts));
+          localStorage.setItem("litecast-progress", JSON.stringify(playbackProgress));
+          console.warn("LocalStorage quota exceeded - saved podcasts only, episodes may be incomplete");
+        } catch (e) {
+          console.error("Even minimal save failed:", e);
+        }
+      }
     }
-  }, [bookmarkedEpisodeIds, isHydrated]);
+
+    // Debounce Firestore saves to avoid overwhelming the backend
+    if (user) {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+      saveTimeoutRef.current = setTimeout(() => {
+        saveToFirestore(data);
+      }, 2000); // Wait 2 seconds after last change before saving to Firestore
+    }
+
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, [podcasts, episodes, playbackProgress, bookmarkedEpisodeIds, isHydrated, authLoading, user, saveToFirestore]);
 
   const subscribe = async (podcast: Podcast, feedUrl: string) => {
-    // Check if already subscribed
     if (podcasts.some((p) => p.id === podcast.id)) return;
 
     try {
-      // Fetch episodes from the feed
       const response = await fetch(`/api/feed/episodes?url=${encodeURIComponent(feedUrl)}`);
       const data = await response.json();
 
@@ -110,14 +370,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      // Add podcast to library
-      const newPodcast: Podcast = {
-        ...podcast,
-        feedUrl,
-      };
-      setPodcasts((prev) => [...prev, newPodcast]);
-
-      // Add all episodes from the feed
+      const newPodcast: Podcast = { ...podcast, feedUrl };
       const newEpisodes: Episode[] = (data.episodes || []).map((ep: any) => ({
         id: ep.id || `${podcast.id}-${ep.title}`,
         podcastId: podcast.id,
@@ -131,6 +384,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
         transcriptUrl: ep.transcriptUrl,
       }));
 
+      setPodcasts((prev) => [...prev, newPodcast]);
       setEpisodes((prev) => [...prev, ...newEpisodes]);
     } catch (error) {
       console.error("Failed to subscribe:", error);
@@ -148,11 +402,8 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
 
   const getNewReleases = (): Episode[] => {
     const startedEpisodeIds = playbackProgress.map((p) => p.episodeId);
-
-    // Get unlistened episodes
     const unlistenedEpisodes = episodes.filter((ep) => !startedEpisodeIds.includes(ep.id));
 
-    // Group by podcast and get only the most recent per podcast
     const latestPerPodcast = new Map<string, Episode>();
     for (const ep of unlistenedEpisodes) {
       const existing = latestPerPodcast.get(ep.podcastId);
@@ -161,7 +412,6 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    // Return sorted by date
     return Array.from(latestPerPodcast.values())
       .sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
   };
@@ -208,14 +458,57 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
     return bookmarkedEpisodeIds.includes(episodeId);
   };
 
+  const fetchAllEpisodes = async (podcastId: string): Promise<{ added: number; total: number }> => {
+    const podcast = podcasts.find((p) => p.id === podcastId);
+    if (!podcast || !podcast.feedUrl) {
+      return { added: 0, total: 0 };
+    }
+
+    try {
+      // Fetch all episodes (no limit)
+      const response = await fetch(`/api/feed/episodes?url=${encodeURIComponent(podcast.feedUrl)}&limit=all`);
+      const data = await response.json();
+
+      if (data.error) {
+        console.error("Failed to fetch episodes:", data.error);
+        return { added: 0, total: 0 };
+      }
+
+      const existingIds = new Set(episodes.filter(e => e.podcastId === podcastId).map(e => e.id));
+
+      const newEpisodes: Episode[] = (data.episodes || [])
+        .map((ep: any) => ({
+          id: ep.id || `${podcastId}-${ep.title}`,
+          podcastId: podcastId,
+          title: ep.title,
+          description: ep.description || "",
+          audioUrl: ep.audioUrl || "",
+          duration: ep.duration || 0,
+          publishedAt: ep.publishedAt || new Date().toISOString(),
+          podcastTitle: podcast.title,
+          podcastArtworkUrl: podcast.artworkUrl,
+          transcriptUrl: ep.transcriptUrl,
+        }))
+        .filter((ep: Episode) => !existingIds.has(ep.id));
+
+      if (newEpisodes.length > 0) {
+        setEpisodes((prev) => [...prev, ...newEpisodes]);
+      }
+
+      return { added: newEpisodes.length, total: data.episodes?.length || 0 };
+    } catch (error) {
+      console.error("Failed to fetch all episodes:", error);
+      return { added: 0, total: 0 };
+    }
+  };
+
   const getBookmarkedEpisodes = (): Episode[] => {
     return episodes
       .filter((ep) => bookmarkedEpisodeIds.includes(ep.id))
       .sort((a, b) => {
-        // Sort by when they were bookmarked (order in the array)
         const indexA = bookmarkedEpisodeIds.indexOf(a.id);
         const indexB = bookmarkedEpisodeIds.indexOf(b.id);
-        return indexB - indexA; // Most recently bookmarked first
+        return indexB - indexA;
       });
   };
 
@@ -236,6 +529,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
         updateProgress,
         toggleBookmark,
         isBookmarked,
+        fetchAllEpisodes,
       }}
     >
       {children}
