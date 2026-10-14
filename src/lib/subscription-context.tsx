@@ -74,7 +74,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
 
   // Save to Firestore when user is logged in
   const saveToFirestore = useCallback(async (data: UserData) => {
-    if (!user || isSyncing) return;
+    if (!user || isSyncing || !db) return;
 
     // Stop trying after too many errors (e.g., document too large)
     if (firestoreErrorCount.current >= 5) {
@@ -149,7 +149,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
     if (authLoading) return;
 
     const loadData = async () => {
-      if (user) {
+      if (user && db) {
         // User is logged in - load from Firestore and merge with localStorage
         setIsSyncing(true);
         isSyncingRef.current = true;
@@ -255,7 +255,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
 
   // Listen for real-time updates from Firestore (for cross-device sync)
   useEffect(() => {
-    if (!user) return;
+    if (!user || !db) return;
 
     const unsubscribe = onSnapshot(doc(db, "users", user.uid), (docSnap) => {
       // Don't update state during initial sync to avoid overwriting local data
