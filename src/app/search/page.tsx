@@ -68,7 +68,7 @@ export default function SearchPage() {
   const inputRef = useRef<HTMLInputElement>(null);
   const suggestionsRef = useRef<HTMLDivElement>(null);
 
-  const { subscribe, isSubscribed, isLoading: isSubscribing } = useSubscriptions();
+  const { subscribe, isSubscribed } = useSubscriptions();
 
   // Load recent searches on mount
   useEffect(() => {
