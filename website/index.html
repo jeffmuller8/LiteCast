@@ -14,6 +14,7 @@
       --navy: #02335E;
       --blue: #0B518D;
       --gold: #E6A91A;
+      --tagline-gold: #D18D04;
       --ice: #96C4E3;
     }
 
@@ -81,21 +82,33 @@
       display: flex;
       flex-direction: column;
       align-items: center;
-      justify-content: center;
-      gap: clamp(8px, 2vh, 20px);
-      padding: 1vh 0 4.5vh;
+      justify-content: flex-start;
+      gap: clamp(8px, 1.6vh, 16px);
+      padding: 1.5vh 0 0;
     }
 
     .logo {
       display: block;
-      height: min(72vh, 600px);
+      height: min(calc(100vh - 200px), 700px);
       width: auto;
       max-width: 100%;
       animation: drop-in 0.8s cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
     }
 
     /* OS-style download badges */
+    .tagline {
+      margin-top: -1vh;
+      font-size: clamp(18px, 1.6vw, 24px);
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      color: var(--tagline-gold);
+      text-align: center;
+      text-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+      animation: fade-up 0.6s 0.3s ease-out both;
+    }
+
     .downloads {
+      margin-top: 0.6vh;
       display: grid;
       grid-template-columns: repeat(4, auto);
       gap: 12px;
@@ -195,13 +208,13 @@
     }
 
     @media (prefers-reduced-motion: reduce) {
-      .logo, .downloads { animation: none; }
+      .logo, .tagline, .downloads { animation: none; }
     }
 
     /* Narrower desktops: badges go 2 x 2 */
     @media (max-width: 1280px) {
       .downloads { grid-template-columns: repeat(2, auto); }
-      .logo { height: min(62vh, 560px); }
+      .logo { height: min(calc(100vh - 270px), 620px); }
     }
 
     /* Phones / portrait: hero on top, navy + water below, page may scroll */
@@ -250,7 +263,9 @@
         gap: 16px;
       }
 
-      .logo { height: auto; width: min(62vw, 300px); }
+      .logo { height: auto; width: min(66vw, 320px); }
+
+      .tagline { margin-top: -4px; font-size: 18px; }
 
       .downloads {
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -283,6 +298,8 @@
 
     <div class="content">
       <img class="logo" src="logo-sticker.svg" alt="Cast Lite">
+
+      <p class="tagline">A light and smooth app for your freshest podcasts.</p>
 
 
       <nav class="downloads" aria-label="Downloads">
