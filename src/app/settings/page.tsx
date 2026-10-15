@@ -5,11 +5,13 @@ import { Settings, Upload, Download, FileText, Check, AlertCircle, Sun, Moon } f
 import { useSubscriptions } from "@/lib/subscription-context";
 import { useToast } from "@/components/toast";
 import { useTheme } from "@/lib/theme-context";
+import { usePlayer } from "@/lib/player-context";
 
 export default function SettingsPage() {
   const { podcasts, subscribe } = useSubscriptions();
   const { showToast } = useToast();
   const { theme, setTheme } = useTheme();
+  const { keepScreenOn, setKeepScreenOn, wakeLockSupported } = usePlayer();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [importStatus, setImportStatus] = useState<{
@@ -160,6 +162,39 @@ export default function SettingsPage() {
                 Dark
               </button>
             </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Playback Section */}
+      <section className="max-w-2xl mb-8">
+        <h2 className="text-lg font-semibold mb-4">Playback</h2>
+        <div className="bg-light-surface dark:bg-zinc-800/50 rounded-xl p-6">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="font-medium text-light-text dark:text-white">Keep screen on while playing</p>
+              <p className="text-sm text-gray-500 dark:text-zinc-400">
+                {wakeLockSupported
+                  ? "Stops your phone from locking during playback. Uses more battery."
+                  : "Not supported in this browser."}
+              </p>
+            </div>
+            <button
+              role="switch"
+              aria-checked={keepScreenOn}
+              aria-label="Keep screen on while playing"
+              disabled={!wakeLockSupported}
+              onClick={() => setKeepScreenOn(!keepScreenOn)}
+              className={`relative inline-flex h-7 w-12 flex-shrink-0 items-center rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                keepScreenOn ? "bg-light-primary dark:bg-sky-600" : "bg-gray-300 dark:bg-zinc-700"
+              }`}
+            >
+              <span
+                className={`inline-block h-5 w-5 rounded-full bg-white shadow transition-transform ${
+                  keepScreenOn ? "translate-x-6" : "translate-x-1"
+                }`}
+              />
+            </button>
           </div>
         </div>
       </section>

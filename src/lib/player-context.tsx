@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useState, useRef, useEffect, ReactNode } from "react";
+import { createContext, useContext, useState, useRef, useEffect, useSyncExternalStore, ReactNode } from "react";
 
 interface Episode {
   id: string;
@@ -46,7 +46,32 @@ interface PlayerContextType extends PlayerState {
   hasNext: boolean;
   hasPrevious: boolean;
   queueCount: number;
+  keepScreenOn: boolean;
+  setKeepScreenOn: (on: boolean) => void;
+  wakeLockSupported: boolean;
 }
+
+const KEEP_SCREEN_ON_KEY = "litecast-keep-screen-on";
+
+// The keep-screen-on preference lives in localStorage; components re-read it via
+// useSyncExternalStore so server and client renders agree (false on the server).
+const keepScreenOnListeners = new Set<() => void>();
+function subscribeKeepScreenOn(onChange: () => void) {
+  keepScreenOnListeners.add(onChange);
+  return () => {
+    keepScreenOnListeners.delete(onChange);
+  };
+}
+function readKeepScreenOn() {
+  try {
+    return localStorage.getItem(KEEP_SCREEN_ON_KEY) === "true";
+  } catch {
+    return false; // Storage unavailable (private mode)
+  }
+}
+const noSubscribe = () => () => {};
+const SKIP_BACK_SECONDS = 10;
+const SKIP_FORWARD_SECONDS = 30;
 
 const PlayerContext = createContext<PlayerContextType | null>(null);
 
@@ -65,11 +90,39 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const playNextRef = useRef<() => void>(() => {});
+  const keepScreenOn = useSyncExternalStore(subscribeKeepScreenOn, readKeepScreenOn, () => false);
+  const wakeLockSupported = useSyncExternalStore(noSubscribe, () => "wakeLock" in navigator, () => false);
+
+  const setKeepScreenOn = (on: boolean) => {
+    try {
+      localStorage.setItem(KEEP_SCREEN_ON_KEY, String(on));
+    } catch {
+      // Storage unavailable; nothing to persist
+    }
+    keepScreenOnListeners.forEach((notify) => notify());
+  };
 
   // Initialize audio element
   useEffect(() => {
     audioRef.current = new Audio();
     const audio = audioRef.current;
+
+    // Keeps the lock-screen scrubber in step; the OS extrapolates between updates
+    const updatePositionState = () => {
+      if (!("mediaSession" in navigator) || !Number.isFinite(audio.duration) || audio.duration <= 0) return;
+      try {
+        navigator.mediaSession.setPositionState({
+          duration: audio.duration,
+          position: Math.min(audio.currentTime, audio.duration),
+          playbackRate: audio.playbackRate,
+        });
+      } catch {
+        // Some browsers reject position updates mid-load
+      }
+    };
+    ["loadedmetadata", "durationchange", "seeked", "ratechange", "play", "pause"].forEach((type) =>
+      audio.addEventListener(type, updatePositionState)
+    );
 
     audio.addEventListener("timeupdate", () => {
       setState((s) => ({ ...s, currentTime: audio.currentTime }));
@@ -119,6 +172,103 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       audioRef.current.playbackRate = state.playbackSpeed;
     }
   }, [state.playbackSpeed]);
+
+  // Lock-screen / notification controls (Media Session API)
+  useEffect(() => {
+    if (!("mediaSession" in navigator)) return;
+    const session = navigator.mediaSession;
+    const audio = () => audioRef.current;
+
+    const handlers: [MediaSessionAction, MediaSessionActionHandler][] = [
+      ["play", () => { audio()?.play().catch((e) => console.error("Failed to play:", e)); }],
+      ["pause", () => audio()?.pause()],
+      ["seekbackward", (details) => {
+        const a = audio();
+        if (a) a.currentTime = Math.max(a.currentTime - (details.seekOffset || SKIP_BACK_SECONDS), 0);
+      }],
+      ["seekforward", (details) => {
+        const a = audio();
+        if (a) a.currentTime = Math.min(a.currentTime + (details.seekOffset || SKIP_FORWARD_SECONDS), a.duration || Infinity);
+      }],
+      ["seekto", (details) => {
+        const a = audio();
+        if (a && details.seekTime != null) a.currentTime = details.seekTime;
+      }],
+    ];
+
+    for (const [action, handler] of handlers) {
+      try {
+        session.setActionHandler(action, handler);
+      } catch {
+        // Action not supported by this browser
+      }
+    }
+
+    return () => {
+      for (const [action] of handlers) {
+        try {
+          session.setActionHandler(action, null);
+        } catch {
+          // Ignore
+        }
+      }
+    };
+  }, []);
+
+  // Show the current episode's title, show and artwork on the lock screen
+  useEffect(() => {
+    if (!("mediaSession" in navigator)) return;
+    const episode = state.currentEpisode;
+    navigator.mediaSession.metadata = episode
+      ? new MediaMetadata({
+          title: episode.title,
+          artist: episode.podcastTitle,
+          album: "LiteCast",
+          artwork: episode.podcastArtworkUrl
+            ? [{ src: episode.podcastArtworkUrl, sizes: "512x512" }]
+            : [],
+        })
+      : null;
+  }, [state.currentEpisode]);
+
+  useEffect(() => {
+    if (!("mediaSession" in navigator)) return;
+    navigator.mediaSession.playbackState = state.currentEpisode
+      ? state.isPlaying ? "playing" : "paused"
+      : "none";
+  }, [state.isPlaying, state.currentEpisode]);
+
+  // Keep the screen awake while playing, if the user turned that on (Screen Wake Lock API).
+  // The browser drops the lock whenever the page is hidden, so re-request when it comes back.
+  useEffect(() => {
+    if (!keepScreenOn || !state.isPlaying || !("wakeLock" in navigator)) return;
+
+    let lock: WakeLockSentinel | null = null;
+    let cancelled = false;
+
+    const acquire = async () => {
+      if (document.visibilityState !== "visible" || (lock && !lock.released)) return;
+      try {
+        const sentinel = await navigator.wakeLock.request("screen");
+        if (cancelled) {
+          sentinel.release();
+        } else {
+          lock = sentinel;
+        }
+      } catch (e) {
+        console.warn("Screen wake lock unavailable:", e);
+      }
+    };
+
+    acquire();
+    document.addEventListener("visibilitychange", acquire);
+
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", acquire);
+      lock?.release().catch(() => {});
+    };
+  }, [keepScreenOn, state.isPlaying]);
 
   const play = async (episode: Episode) => {
     if (!audioRef.current) return;
@@ -348,6 +498,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         hasNext,
         hasPrevious,
         queueCount,
+        keepScreenOn,
+        setKeepScreenOn,
+        wakeLockSupported,
       }}
     >
       {children}
