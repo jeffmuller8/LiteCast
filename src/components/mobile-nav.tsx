@@ -26,7 +26,7 @@ export function MobileNav() {
         <div className="md:hidden fixed inset-0 z-50 bg-light-bg dark:bg-zinc-950 animate-fadeIn">
           {/* Header */}
           <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-zinc-800">
-            <h1 className="text-xl font-bold text-light-text dark:text-white">Account</h1>
+            <h1 className="text-xl font-bold text-light-text dark:text-white">{user ? "Account" : "Menu"}</h1>
             <button
               onClick={() => setShowMenu(false)}
               className="p-2 text-gray-500 dark:text-zinc-400 hover:text-light-text dark:hover:text-white transition-colors"
@@ -68,16 +68,30 @@ export function MobileNav() {
               <Settings className="w-6 h-6 text-gray-500 dark:text-zinc-400" />
               <span className="font-medium">Settings</span>
             </Link>
-            <button
-              onClick={() => {
-                signOut();
-                setShowMenu(false);
-              }}
-              className="flex items-center gap-4 p-4 rounded-xl w-full text-left bg-light-surface dark:bg-zinc-900 text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors"
-            >
-              <LogOut className="w-6 h-6" />
-              <span className="font-medium">Sign Out</span>
-            </button>
+
+            {user ? (
+              <button
+                onClick={() => {
+                  signOut();
+                  setShowMenu(false);
+                }}
+                className="flex items-center gap-4 p-4 rounded-xl w-full text-left bg-light-surface dark:bg-zinc-900 text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors"
+              >
+                <LogOut className="w-6 h-6" />
+                <span className="font-medium">Sign Out</span>
+              </button>
+            ) : (
+              <button
+                onClick={() => {
+                  signInWithGoogle();
+                  setShowMenu(false);
+                }}
+                className="flex items-center gap-4 p-4 rounded-xl w-full text-left bg-light-surface dark:bg-zinc-900 text-light-primary dark:text-sky-400 hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors"
+              >
+                <User className="w-6 h-6" />
+                <span className="font-medium">Sign In with Google</span>
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -105,36 +119,28 @@ export function MobileNav() {
             );
           })}
 
-          {/* User Avatar */}
-          {user ? (
-            <button
-              onClick={() => setShowMenu(!showMenu)}
-              className="flex flex-col items-center justify-center flex-1 h-full transition-colors text-gray-500 dark:text-zinc-500"
-            >
-              {user.photoURL ? (
-                <Image
-                  src={user.photoURL}
-                  alt={user.displayName || "User"}
-                  width={28}
-                  height={28}
-                  className="rounded-full"
-                />
-              ) : (
-                <div className="w-7 h-7 rounded-full bg-light-primary dark:bg-sky-600 flex items-center justify-center text-white text-sm font-medium">
-                  {user.displayName?.charAt(0) || user.email?.charAt(0) || "U"}
-                </div>
-              )}
-              <span className="text-xs mt-1 font-medium">Account</span>
-            </button>
-          ) : (
-            <button
-              onClick={signInWithGoogle}
-              className="flex flex-col items-center justify-center flex-1 h-full transition-colors text-gray-500 dark:text-zinc-500"
-            >
+          {/* User Avatar / Menu Button */}
+          <button
+            onClick={() => setShowMenu(!showMenu)}
+            className="flex flex-col items-center justify-center flex-1 h-full transition-colors text-gray-500 dark:text-zinc-500"
+          >
+            {user?.photoURL ? (
+              <Image
+                src={user.photoURL}
+                alt={user.displayName || "User"}
+                width={28}
+                height={28}
+                className="rounded-full"
+              />
+            ) : user ? (
+              <div className="w-7 h-7 rounded-full bg-light-primary dark:bg-sky-600 flex items-center justify-center text-white text-sm font-medium">
+                {user.displayName?.charAt(0) || user.email?.charAt(0) || "U"}
+              </div>
+            ) : (
               <User className="w-6 h-6" />
-              <span className="text-xs mt-1 font-medium">Sign In</span>
-            </button>
-          )}
+            )}
+            <span className="text-xs mt-1 font-medium">{user ? "Account" : "More"}</span>
+          </button>
         </div>
       </nav>
     </>
