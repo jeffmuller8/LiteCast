@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { usePlayer } from "@/lib/player-context";
+import { useSubscriptions } from "@/lib/subscription-context";
 import { formatDuration } from "@/lib/mock-data";
 import { Play, Pause, RotateCcw, RotateCw, Volume2, VolumeX, ListMusic, X, FileText, Loader2, ChevronUp, ChevronDown, Maximize2 } from "lucide-react";
 import Link from "next/link";
@@ -36,9 +37,11 @@ export function MiniPlayer() {
     seekTo,
     play,
   } = usePlayer();
+  const { recordPlay } = useSubscriptions();
 
   // All hooks must be called before any early returns
   const [showQueue, setShowQueue] = useState(false);
+  const lastRecordedEpisodeRef = useRef<string | null>(null);
   const [showTranscript, setShowTranscript] = useState(false);
   const [showSpeedMenu, setShowSpeedMenu] = useState(false);
   const [mobileExpanded, setMobileExpanded] = useState(true);
@@ -80,6 +83,18 @@ export function MiniPlayer() {
     setTranscript([]);
     setTranscriptError(null);
   }, [currentEpisode?.id]);
+
+  // Track plays for "Most Listened" feature
+  useEffect(() => {
+    if (currentEpisode && isPlaying && currentEpisode.podcastId) {
+      // Only record once per episode play session
+      if (lastRecordedEpisodeRef.current !== currentEpisode.id) {
+        lastRecordedEpisodeRef.current = currentEpisode.id;
+        // Record estimated duration (will be refined as user listens)
+        recordPlay(currentEpisode.podcastId, currentEpisode.duration || 1800);
+      }
+    }
+  }, [currentEpisode?.id, isPlaying, currentEpisode?.podcastId, currentEpisode?.duration, recordPlay]);
 
   // Auto-scroll to active segment
   useEffect(() => {

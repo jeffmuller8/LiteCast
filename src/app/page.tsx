@@ -4,12 +4,21 @@ import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { EpisodeItem } from "@/components/episode-item";
-import { useSubscriptions } from "@/lib/subscription-context";
+import { useSubscriptions, NewReleasesSortOption } from "@/lib/subscription-context";
 import { usePlayer } from "@/lib/player-context";
-import { Search, Headphones, ListMusic, Play, GripVertical, X } from "lucide-react";
+import { Tooltip } from "@/components/tooltip";
+import { Search, Headphones, ListMusic, Play, GripVertical, X, ChevronDown, Clock, Pin, TrendingUp, ArrowUpAZ } from "lucide-react";
 import { formatDuration } from "@/lib/mock-data";
 
 type Tab = "new-releases" | "in-progress" | "queue";
+
+const SORT_OPTIONS: { value: NewReleasesSortOption; label: string; icon: typeof Clock; description: string }[] = [
+  { value: "newest", label: "Newest", icon: Clock, description: "Most recently published episodes first" },
+  { value: "pinned", label: "Pinned First", icon: Pin, description: "Your pinned podcasts appear at the top" },
+  { value: "most-listened", label: "Most Listened", icon: TrendingUp, description: "Like Chrome's most visited - based on your listening habits" },
+  { value: "oldest", label: "Oldest", icon: Clock, description: "Oldest episodes first" },
+  { value: "a-z", label: "A-Z", icon: ArrowUpAZ, description: "Alphabetical by podcast name" },
+];
 
 const tabOrder: Tab[] = ["new-releases", "in-progress", "queue"];
 
@@ -19,13 +28,27 @@ export default function Home() {
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [indicatorStyle, setIndicatorStyle] = useState({ left: 0, width: 0, opacity: 0 });
+  const [sortBy, setSortBy] = useState<NewReleasesSortOption>("newest");
+  const [showSortDropdown, setShowSortDropdown] = useState(false);
   const tabsRef = useRef<HTMLDivElement>(null);
   const buttonRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const sortDropdownRef = useRef<HTMLDivElement>(null);
 
   const { podcasts, getNewReleases, getInProgressEpisodes } = useSubscriptions();
   const { queue, queueIndex, currentEpisode, play, reorderQueue, removeFromQueue } = usePlayer();
 
-  const newReleases = getNewReleases();
+  const newReleases = getNewReleases(sortBy);
+
+  // Close sort dropdown when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (sortDropdownRef.current && !sortDropdownRef.current.contains(event.target as Node)) {
+        setShowSortDropdown(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
   const inProgressEpisodes = getInProgressEpisodes();
   const hasPodcasts = podcasts.length > 0;
   const upcomingEpisodes = queue.slice(queueIndex + 1);
@@ -154,6 +177,61 @@ export default function Home() {
         <div className="px-4 md:px-8 pt-[5px] md:pt-2.5 pb-4 md:pb-8">
         {activeTab === "new-releases" && (
           <div key={`new-releases-${animationKey}`} className="space-y-3">
+            {/* Sort Dropdown */}
+            {newReleases.length > 0 && (
+              <div className="flex justify-end mb-2" ref={sortDropdownRef}>
+                <div className="relative">
+                  <button
+                    onClick={() => setShowSortDropdown(!showSortDropdown)}
+                    className="flex items-center gap-2 px-3 py-1.5 text-sm text-gray-500 dark:text-zinc-400 hover:text-light-text dark:hover:text-white hover:bg-gray-100 dark:hover:bg-zinc-800 rounded-lg transition-colors"
+                  >
+                    {(() => {
+                      const option = SORT_OPTIONS.find(o => o.value === sortBy);
+                      const Icon = option?.icon || Clock;
+                      return <Icon className="w-4 h-4" />;
+                    })()}
+                    <span>{SORT_OPTIONS.find(o => o.value === sortBy)?.label}</span>
+                    <ChevronDown className={`w-4 h-4 transition-transform ${showSortDropdown ? "rotate-180" : ""}`} />
+                  </button>
+
+                  {showSortDropdown && (
+                    <div className="absolute right-0 mt-1 w-64 bg-white dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded-xl shadow-xl z-30 overflow-hidden animate-fadeIn">
+                      {SORT_OPTIONS.map((option) => {
+                        const Icon = option.icon;
+                        const isActive = sortBy === option.value;
+                        return (
+                          <button
+                            key={option.value}
+                            onClick={() => {
+                              setSortBy(option.value);
+                              setShowSortDropdown(false);
+                            }}
+                            className={`w-full px-4 py-3 text-left flex items-start gap-3 hover:bg-gray-50 dark:hover:bg-zinc-700/50 transition-colors ${
+                              isActive ? "bg-light-primary/10 dark:bg-sky-500/10" : ""
+                            }`}
+                          >
+                            <Icon className={`w-4 h-4 mt-0.5 flex-shrink-0 ${
+                              isActive ? "text-light-primary dark:text-sky-400" : "text-gray-400 dark:text-zinc-500"
+                            }`} />
+                            <div>
+                              <p className={`text-sm font-medium ${
+                                isActive ? "text-light-primary dark:text-sky-400" : "text-light-text dark:text-white"
+                              }`}>
+                                {option.label}
+                              </p>
+                              <p className="text-xs text-gray-500 dark:text-zinc-500 mt-0.5">
+                                {option.description}
+                              </p>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             {newReleases.length > 0 ? (
               newReleases.map((episode, index) => (
                 <div

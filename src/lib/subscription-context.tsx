@@ -33,11 +33,20 @@ export interface PlaybackProgress {
   completed: boolean;
 }
 
+export interface ListeningStats {
+  podcastId: string;
+  playCount: number;
+  totalTimeListened: number; // in seconds
+  lastPlayedAt: string;
+}
+
 interface UserData {
   podcasts: Podcast[];
   episodes: Episode[];
   playbackProgress: PlaybackProgress[];
   bookmarkedEpisodeIds: string[];
+  pinnedPodcastIds: string[];
+  listeningStats: ListeningStats[];
 }
 
 interface SubscriptionContextType {
@@ -45,18 +54,26 @@ interface SubscriptionContextType {
   episodes: Episode[];
   playbackProgress: PlaybackProgress[];
   bookmarkedEpisodeIds: string[];
+  pinnedPodcastIds: string[];
+  listeningStats: ListeningStats[];
   isHydrated: boolean;
   subscribe: (podcast: Podcast, feedUrl: string) => Promise<void>;
   unsubscribe: (podcastId: string) => void;
   isSubscribed: (podcastId: string) => boolean;
-  getNewReleases: () => Episode[];
+  getNewReleases: (sortBy?: NewReleasesSortOption) => Episode[];
   getInProgressEpisodes: () => (Episode & { progress: number })[];
   getBookmarkedEpisodes: () => Episode[];
   updateProgress: (episodeId: string, currentTime: number, completed: boolean) => void;
   toggleBookmark: (episodeId: string) => void;
   isBookmarked: (episodeId: string) => boolean;
   fetchAllEpisodes: (podcastId: string) => Promise<{ added: number; total: number }>;
+  togglePin: (podcastId: string) => void;
+  isPinned: (podcastId: string) => boolean;
+  recordPlay: (podcastId: string, duration: number) => void;
+  getListeningStats: (podcastId: string) => ListeningStats | undefined;
 }
+
+export type NewReleasesSortOption = "newest" | "pinned" | "most-listened" | "oldest" | "a-z";
 
 const SubscriptionContext = createContext<SubscriptionContextType | null>(null);
 
@@ -66,6 +83,8 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
   const [episodes, setEpisodes] = useState<Episode[]>([]);
   const [playbackProgress, setPlaybackProgress] = useState<PlaybackProgress[]>([]);
   const [bookmarkedEpisodeIds, setBookmarkedEpisodeIds] = useState<string[]>([]);
+  const [pinnedPodcastIds, setPinnedPodcastIds] = useState<string[]>([]);
+  const [listeningStats, setListeningStats] = useState<ListeningStats[]>([]);
   const [isHydrated, setIsHydrated] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const isSyncingRef = useRef(false);
@@ -114,6 +133,8 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
         episodes: limitedEpisodes,
         playbackProgress: data.playbackProgress,
         bookmarkedEpisodeIds: data.bookmarkedEpisodeIds,
+        pinnedPodcastIds: data.pinnedPodcastIds || [],
+        listeningStats: data.listeningStats || [],
         updatedAt: new Date().toISOString(),
       });
 
@@ -132,6 +153,8 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
             episodes: [], // Skip episodes if document too large
             playbackProgress: data.playbackProgress,
             bookmarkedEpisodeIds: data.bookmarkedEpisodeIds,
+            pinnedPodcastIds: data.pinnedPodcastIds || [],
+            listeningStats: data.listeningStats || [],
             updatedAt: new Date().toISOString(),
             note: "Episodes stored locally only due to size limits",
           });
@@ -162,12 +185,16 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
           const savedEpisodes = localStorage.getItem("litecast-episodes");
           const savedProgress = localStorage.getItem("litecast-progress");
           const savedBookmarks = localStorage.getItem("litecast-bookmarks");
+          const savedPinned = localStorage.getItem("litecast-pinned");
+          const savedStats = localStorage.getItem("litecast-listening-stats");
 
           const localData: UserData = {
             podcasts: savedPodcasts ? JSON.parse(savedPodcasts) : [],
             episodes: savedEpisodes ? JSON.parse(savedEpisodes) : [],
             playbackProgress: savedProgress ? JSON.parse(savedProgress) : [],
             bookmarkedEpisodeIds: savedBookmarks ? JSON.parse(savedBookmarks) : [],
+            pinnedPodcastIds: savedPinned ? JSON.parse(savedPinned) : [],
+            listeningStats: savedStats ? JSON.parse(savedStats) : [],
           };
 
           if (docSnap.exists()) {
@@ -203,10 +230,25 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
               ...(cloudData.bookmarkedEpisodeIds || [])
             ])];
 
+            // Merge pinned podcasts (union)
+            const mergedPinned = [...new Set([
+              ...localData.pinnedPodcastIds,
+              ...(cloudData.pinnedPodcastIds || [])
+            ])];
+
+            // Merge listening stats (prefer local, add cloud-only)
+            const localStatsIds = new Set(localData.listeningStats.map(s => s.podcastId));
+            const cloudOnlyStats = (cloudData.listeningStats || []).filter(
+              s => !localStatsIds.has(s.podcastId)
+            );
+            const mergedStats = [...localData.listeningStats, ...cloudOnlyStats];
+
             setPodcasts(mergedPodcasts);
             setEpisodes(mergedEpisodes);
             setPlaybackProgress(mergedProgress);
             setBookmarkedEpisodeIds(mergedBookmarks);
+            setPinnedPodcastIds(mergedPinned);
+            setListeningStats(mergedStats);
 
             console.log(`Loaded: ${mergedPodcasts.length} podcasts, ${mergedEpisodes.length} episodes`);
           } else {
@@ -215,6 +257,8 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
             setEpisodes(localData.episodes);
             setPlaybackProgress(localData.playbackProgress);
             setBookmarkedEpisodeIds(localData.bookmarkedEpisodeIds);
+            setPinnedPodcastIds(localData.pinnedPodcastIds);
+            setListeningStats(localData.listeningStats);
 
             console.log(`Loaded from localStorage: ${localData.podcasts.length} podcasts, ${localData.episodes.length} episodes`);
           }
@@ -225,11 +269,15 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
           const savedEpisodes = localStorage.getItem("litecast-episodes");
           const savedProgress = localStorage.getItem("litecast-progress");
           const savedBookmarks = localStorage.getItem("litecast-bookmarks");
+          const savedPinned = localStorage.getItem("litecast-pinned");
+          const savedStats = localStorage.getItem("litecast-listening-stats");
 
           if (savedPodcasts) setPodcasts(JSON.parse(savedPodcasts));
           if (savedEpisodes) setEpisodes(JSON.parse(savedEpisodes));
           if (savedProgress) setPlaybackProgress(JSON.parse(savedProgress));
           if (savedBookmarks) setBookmarkedEpisodeIds(JSON.parse(savedBookmarks));
+          if (savedPinned) setPinnedPodcastIds(JSON.parse(savedPinned));
+          if (savedStats) setListeningStats(JSON.parse(savedStats));
         } finally {
           setIsSyncing(false);
           isSyncingRef.current = false;
@@ -240,11 +288,15 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
         const savedEpisodes = localStorage.getItem("litecast-episodes");
         const savedProgress = localStorage.getItem("litecast-progress");
         const savedBookmarks = localStorage.getItem("litecast-bookmarks");
+        const savedPinned = localStorage.getItem("litecast-pinned");
+        const savedStats = localStorage.getItem("litecast-listening-stats");
 
         if (savedPodcasts) setPodcasts(JSON.parse(savedPodcasts));
         if (savedEpisodes) setEpisodes(JSON.parse(savedEpisodes));
         if (savedProgress) setPlaybackProgress(JSON.parse(savedProgress));
         if (savedBookmarks) setBookmarkedEpisodeIds(JSON.parse(savedBookmarks));
+        if (savedPinned) setPinnedPodcastIds(JSON.parse(savedPinned));
+        if (savedStats) setListeningStats(JSON.parse(savedStats));
       }
 
       setIsHydrated(true);
@@ -318,7 +370,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
     // Don't save until hydrated and auth is done loading
     if (!isHydrated || authLoading) return;
 
-    const data: UserData = { podcasts, episodes, playbackProgress, bookmarkedEpisodeIds };
+    const data: UserData = { podcasts, episodes, playbackProgress, bookmarkedEpisodeIds, pinnedPodcastIds, listeningStats };
 
     // Always save to localStorage as immediate backup
     try {
@@ -326,6 +378,8 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
       localStorage.setItem("litecast-episodes", JSON.stringify(episodes));
       localStorage.setItem("litecast-progress", JSON.stringify(playbackProgress));
       localStorage.setItem("litecast-bookmarks", JSON.stringify(bookmarkedEpisodeIds));
+      localStorage.setItem("litecast-pinned", JSON.stringify(pinnedPodcastIds));
+      localStorage.setItem("litecast-listening-stats", JSON.stringify(listeningStats));
       console.log(`LocalStorage saved: ${podcasts.length} podcasts, ${episodes.length} episodes`);
     } catch (error: any) {
       console.error("LocalStorage save failed:", error?.message || error);
@@ -334,6 +388,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
         try {
           localStorage.setItem("litecast-podcasts", JSON.stringify(podcasts));
           localStorage.setItem("litecast-progress", JSON.stringify(playbackProgress));
+          localStorage.setItem("litecast-pinned", JSON.stringify(pinnedPodcastIds));
           console.warn("LocalStorage quota exceeded - saved podcasts only, episodes may be incomplete");
         } catch (e) {
           console.error("Even minimal save failed:", e);
@@ -356,7 +411,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
         clearTimeout(saveTimeoutRef.current);
       }
     };
-  }, [podcasts, episodes, playbackProgress, bookmarkedEpisodeIds, isHydrated, authLoading, user, saveToFirestore]);
+  }, [podcasts, episodes, playbackProgress, bookmarkedEpisodeIds, pinnedPodcastIds, listeningStats, isHydrated, authLoading, user, saveToFirestore]);
 
   const subscribe = async (podcast: Podcast, feedUrl: string) => {
     if (podcasts.some((p) => p.id === podcast.id)) return;
@@ -400,7 +455,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
     return podcasts.some((p) => p.id === podcastId);
   };
 
-  const getNewReleases = (): Episode[] => {
+  const getNewReleases = (sortBy: NewReleasesSortOption = "newest"): Episode[] => {
     const startedEpisodeIds = playbackProgress.map((p) => p.episodeId);
     const unlistenedEpisodes = episodes.filter((ep) => !startedEpisodeIds.includes(ep.id));
 
@@ -412,8 +467,48 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    return Array.from(latestPerPodcast.values())
-      .sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
+    const releases = Array.from(latestPerPodcast.values());
+
+    switch (sortBy) {
+      case "newest":
+        return releases.sort((a, b) =>
+          new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime()
+        );
+
+      case "pinned":
+        return releases.sort((a, b) => {
+          const aPinned = pinnedPodcastIds.includes(a.podcastId);
+          const bPinned = pinnedPodcastIds.includes(b.podcastId);
+          if (aPinned && !bPinned) return -1;
+          if (!aPinned && bPinned) return 1;
+          return new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime();
+        });
+
+      case "most-listened":
+        return releases.sort((a, b) => {
+          const aStats = listeningStats.find(s => s.podcastId === a.podcastId);
+          const bStats = listeningStats.find(s => s.podcastId === b.podcastId);
+          const aScore = aStats ? aStats.playCount + (aStats.totalTimeListened / 3600) : 0;
+          const bScore = bStats ? bStats.playCount + (bStats.totalTimeListened / 3600) : 0;
+          if (bScore !== aScore) return bScore - aScore;
+          return new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime();
+        });
+
+      case "oldest":
+        return releases.sort((a, b) =>
+          new Date(a.publishedAt).getTime() - new Date(b.publishedAt).getTime()
+        );
+
+      case "a-z":
+        return releases.sort((a, b) =>
+          a.podcastTitle.localeCompare(b.podcastTitle)
+        );
+
+      default:
+        return releases.sort((a, b) =>
+          new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime()
+        );
+    }
   };
 
   const getInProgressEpisodes = (): (Episode & { progress: number })[] => {
@@ -512,6 +607,50 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
       });
   };
 
+  const togglePin = (podcastId: string) => {
+    setPinnedPodcastIds((prev) => {
+      if (prev.includes(podcastId)) {
+        return prev.filter((id) => id !== podcastId);
+      }
+      return [...prev, podcastId];
+    });
+  };
+
+  const isPinned = (podcastId: string) => {
+    return pinnedPodcastIds.includes(podcastId);
+  };
+
+  const recordPlay = (podcastId: string, duration: number) => {
+    setListeningStats((prev) => {
+      const existing = prev.find((s) => s.podcastId === podcastId);
+      if (existing) {
+        return prev.map((s) =>
+          s.podcastId === podcastId
+            ? {
+                ...s,
+                playCount: s.playCount + 1,
+                totalTimeListened: s.totalTimeListened + duration,
+                lastPlayedAt: new Date().toISOString(),
+              }
+            : s
+        );
+      }
+      return [
+        ...prev,
+        {
+          podcastId,
+          playCount: 1,
+          totalTimeListened: duration,
+          lastPlayedAt: new Date().toISOString(),
+        },
+      ];
+    });
+  };
+
+  const getListeningStats = (podcastId: string): ListeningStats | undefined => {
+    return listeningStats.find((s) => s.podcastId === podcastId);
+  };
+
   return (
     <SubscriptionContext.Provider
       value={{
@@ -519,6 +658,8 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
         episodes,
         playbackProgress,
         bookmarkedEpisodeIds,
+        pinnedPodcastIds,
+        listeningStats,
         isHydrated,
         subscribe,
         unsubscribe,
@@ -530,6 +671,10 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
         toggleBookmark,
         isBookmarked,
         fetchAllEpisodes,
+        togglePin,
+        isPinned,
+        recordPlay,
+        getListeningStats,
       }}
     >
       {children}

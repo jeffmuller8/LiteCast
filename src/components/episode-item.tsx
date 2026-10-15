@@ -253,7 +253,10 @@ export function EpisodeItem({
               <Bookmark className="w-5 h-5" />
             )}
           </button>
-          <button className="p-2 text-gray-500 dark:text-zinc-400 hover:text-light-text dark:hover:text-white transition-colors">
+          <button
+            className="p-2 text-gray-500 dark:text-zinc-400 hover:text-light-text dark:hover:text-white transition-colors"
+            title="Download episode"
+          >
             <Download className="w-5 h-5" />
           </button>
 
@@ -262,6 +265,7 @@ export function EpisodeItem({
             <button
               onClick={() => setShowMenu(!showMenu)}
               className="p-2 text-gray-500 dark:text-zinc-400 hover:text-light-text dark:hover:text-white transition-colors"
+              title="More options"
             >
               <MoreHorizontal className="w-5 h-5" />
             </button>

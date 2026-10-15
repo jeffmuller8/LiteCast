@@ -3,18 +3,19 @@
 import { use, useState, useMemo } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowLeft, Play, ListMusic, Share2, ArrowUp, ArrowDown, RefreshCw } from "lucide-react";
+import { ArrowLeft, Play, ListMusic, Share2, ArrowUp, ArrowDown, RefreshCw, Pin } from "lucide-react";
 import { EpisodeItem } from "@/components/episode-item";
 import { useSubscriptions } from "@/lib/subscription-context";
 import { usePlayer } from "@/lib/player-context";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/toast";
+import { Tooltip } from "@/components/tooltip";
 
 type SortOrder = "newest" | "oldest";
 
 export default function PodcastPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const { podcasts, episodes: allEpisodes, unsubscribe, isHydrated, fetchAllEpisodes } = useSubscriptions();
+  const { podcasts, episodes: allEpisodes, unsubscribe, isHydrated, fetchAllEpisodes, isPinned, togglePin } = useSubscriptions();
   const { play, playAll } = usePlayer();
   const router = useRouter();
   const { showToast } = useToast();
@@ -152,17 +153,34 @@ export default function PodcastPage({ params }: { params: Promise<{ id: string }
               <ListMusic className="w-4 h-4 md:w-5 md:h-5" />
               Play All
             </button>
-            <button
-              onClick={() => {
-                if (podcast.feedUrl) {
-                  navigator.clipboard.writeText(podcast.feedUrl);
-                  showToast(`${podcast.title} RSS feed link copied to clipboard`);
-                }
-              }}
-              className="p-3 text-gray-500 dark:text-zinc-400 hover:text-light-text dark:hover:text-white hover:bg-gray-200 dark:hover:bg-zinc-800 rounded-full transition-colors"
-            >
-              <Share2 className="w-5 h-5" />
-            </button>
+            <Tooltip content={isPinned(decodedId) ? "Unpin from top of New Releases" : "Pin to top of New Releases"}>
+              <button
+                onClick={() => {
+                  togglePin(decodedId);
+                  showToast(isPinned(decodedId) ? `Unpinned ${podcast.title}` : `Pinned ${podcast.title} to New Releases`);
+                }}
+                className={`p-3 rounded-full transition-colors ${
+                  isPinned(decodedId)
+                    ? "text-light-primary dark:text-sky-400 bg-light-primary/10 dark:bg-sky-500/10"
+                    : "text-gray-500 dark:text-zinc-400 hover:text-light-text dark:hover:text-white hover:bg-gray-200 dark:hover:bg-zinc-800"
+                }`}
+              >
+                <Pin className={`w-5 h-5 ${isPinned(decodedId) ? "fill-current" : ""}`} />
+              </button>
+            </Tooltip>
+            <Tooltip content="Copy RSS feed link">
+              <button
+                onClick={() => {
+                  if (podcast.feedUrl) {
+                    navigator.clipboard.writeText(podcast.feedUrl);
+                    showToast(`${podcast.title} RSS feed link copied to clipboard`);
+                  }
+                }}
+                className="p-3 text-gray-500 dark:text-zinc-400 hover:text-light-text dark:hover:text-white hover:bg-gray-200 dark:hover:bg-zinc-800 rounded-full transition-colors"
+              >
+                <Share2 className="w-5 h-5" />
+              </button>
+            </Tooltip>
             <button
               onClick={handleUnsubscribe}
               className="flex items-center gap-2 px-5 py-2.5 border border-gray-300 dark:border-zinc-600 text-gray-600 dark:text-zinc-300 rounded-full font-medium hover:border-red-500 dark:hover:border-red-500 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-500/10 dark:hover:bg-red-500/10 transition-colors"
