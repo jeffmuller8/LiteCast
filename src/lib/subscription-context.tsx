@@ -77,6 +77,36 @@ export type NewReleasesSortOption = "newest" | "pinned" | "most-listened" | "old
 
 const SubscriptionContext = createContext<SubscriptionContextType | null>(null);
 
+// An episode as returned by /api/feed/episodes
+interface FeedEpisode {
+  id?: string;
+  title: string;
+  description?: string;
+  audioUrl?: string;
+  duration?: number;
+  publishedAt?: string;
+  transcriptUrl?: string;
+}
+
+// Maps an episode from /api/feed/episodes onto our Episode shape
+function toEpisode(ep: FeedEpisode, podcast: Podcast): Episode {
+  return {
+    id: ep.id || `${podcast.id}-${ep.title}`,
+    podcastId: podcast.id,
+    title: ep.title,
+    description: ep.description || "",
+    audioUrl: ep.audioUrl || "",
+    duration: ep.duration || 0,
+    publishedAt: ep.publishedAt || new Date().toISOString(),
+    podcastTitle: podcast.title,
+    podcastArtworkUrl: podcast.artworkUrl,
+    transcriptUrl: ep.transcriptUrl,
+  };
+}
+
+// How many feeds to refresh at once on load
+const FEED_REFRESH_CONCURRENCY = 4;
+
 export function SubscriptionProvider({ children }: { children: ReactNode }) {
   const { user, loading: authLoading } = useAuth();
   const [podcasts, setPodcasts] = useState<Podcast[]>([]);
@@ -90,6 +120,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
   const isSyncingRef = useRef(false);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const firestoreErrorCount = useRef(0);
+  const refreshedForUserRef = useRef<string | null>(null);
 
   // Save to Firestore when user is logged in
   const saveToFirestore = useCallback(async (data: UserData) => {
@@ -305,6 +336,55 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
     loadData();
   }, [user, authLoading]);
 
+  // Once loaded, check every subscribed feed for episodes we don't have yet.
+  // Stored episodes can be missing (a fresh browser loading from Firestore, which
+  // may hold none) or stale (new releases since the last fetch).
+  useEffect(() => {
+    if (!isHydrated || authLoading) return;
+    const refreshKey = user?.uid ?? "local";
+    if (refreshedForUserRef.current === refreshKey) return;
+    refreshedForUserRef.current = refreshKey;
+
+    const feeds = podcasts.filter((p) => p.feedUrl);
+    if (feeds.length === 0) return;
+
+    let cancelled = false;
+    const refreshFeed = async (podcast: Podcast) => {
+      try {
+        const response = await fetch(`/api/feed/episodes?url=${encodeURIComponent(podcast.feedUrl)}`);
+        const data = await response.json();
+        if (cancelled || data.error || !data.episodes?.length) return;
+
+        const fetched: Episode[] = data.episodes.map((ep: FeedEpisode) => toEpisode(ep, podcast));
+        setEpisodes((prev) => {
+          const existingIds = new Set(prev.map((e) => e.id));
+          const missing = fetched.filter((ep) => !existingIds.has(ep.id));
+          return missing.length > 0 ? [...prev, ...missing] : prev;
+        });
+      } catch (error) {
+        console.error(`Failed to refresh episodes for ${podcast.title}:`, error);
+      }
+    };
+
+    const run = async () => {
+      const queue = [...feeds];
+      const workers = Array.from({ length: Math.min(FEED_REFRESH_CONCURRENCY, queue.length) }, async () => {
+        while (!cancelled && queue.length > 0) {
+          await refreshFeed(queue.shift()!);
+        }
+      });
+      await Promise.all(workers);
+      if (!cancelled) console.log(`Refreshed episodes for ${feeds.length} podcasts`);
+    };
+    run();
+
+    return () => {
+      cancelled = true;
+    };
+    // podcasts is read once per load; re-running on every change would refetch all feeds
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isHydrated, authLoading, user]);
+
   // Listen for real-time updates from Firestore (for cross-device sync)
   useEffect(() => {
     if (!user || !db) return;
@@ -426,18 +506,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
       }
 
       const newPodcast: Podcast = { ...podcast, feedUrl };
-      const newEpisodes: Episode[] = (data.episodes || []).map((ep: any) => ({
-        id: ep.id || `${podcast.id}-${ep.title}`,
-        podcastId: podcast.id,
-        title: ep.title,
-        description: ep.description || "",
-        audioUrl: ep.audioUrl || "",
-        duration: ep.duration || 0,
-        publishedAt: ep.publishedAt || new Date().toISOString(),
-        podcastTitle: podcast.title,
-        podcastArtworkUrl: podcast.artworkUrl,
-        transcriptUrl: ep.transcriptUrl,
-      }));
+      const newEpisodes: Episode[] = (data.episodes || []).map((ep: FeedEpisode) => toEpisode(ep, newPodcast));
 
       setPodcasts((prev) => [...prev, newPodcast]);
       setEpisodes((prev) => [...prev, ...newEpisodes]);
@@ -572,18 +641,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
       const existingIds = new Set(episodes.filter(e => e.podcastId === podcastId).map(e => e.id));
 
       const newEpisodes: Episode[] = (data.episodes || [])
-        .map((ep: any) => ({
-          id: ep.id || `${podcastId}-${ep.title}`,
-          podcastId: podcastId,
-          title: ep.title,
-          description: ep.description || "",
-          audioUrl: ep.audioUrl || "",
-          duration: ep.duration || 0,
-          publishedAt: ep.publishedAt || new Date().toISOString(),
-          podcastTitle: podcast.title,
-          podcastArtworkUrl: podcast.artworkUrl,
-          transcriptUrl: ep.transcriptUrl,
-        }))
+        .map((ep: FeedEpisode) => toEpisode(ep, podcast))
         .filter((ep: Episode) => !existingIds.has(ep.id));
 
       if (newEpisodes.length > 0) {
