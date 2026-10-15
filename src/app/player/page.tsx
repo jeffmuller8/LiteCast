@@ -10,6 +10,22 @@ function getDurationParts(seconds: number): { hours: number; minutes: number } {
   const minutes = Math.floor((seconds % 3600) / 60);
   return { hours, minutes };
 }
+
+function DurationLabel({ seconds }: { seconds: number }) {
+  const { hours, minutes } = getDurationParts(seconds);
+  return (
+    <span>
+      {hours > 0 && (
+        <>
+          <span className="font-semibold text-gray-600 dark:text-zinc-400">{hours}</span>
+          <span className="ml-0.5">hr</span>
+        </>
+      )}
+      <span className={`font-semibold text-gray-600 dark:text-zinc-400 ${hours > 0 ? "ml-1" : ""}`}>{minutes}</span>
+      <span className="ml-0.5">min</span>
+    </span>
+  );
+}
 import {
   X,
   Play,
@@ -74,7 +90,7 @@ export default function PlayerPage() {
   return (
     <div className="flex h-full overflow-hidden">
       {/* Main Player Content */}
-      <div className="flex-1 flex flex-col items-center justify-center p-4 md:p-8 transition-all duration-300 overflow-hidden">
+      <div className="flex-1 flex flex-col items-center pt-14 px-4 pb-4 md:justify-center md:p-8 transition-all duration-300 overflow-y-auto md:overflow-hidden">
         {/* Close button */}
         <button
           onClick={() => router.back()}
@@ -86,7 +102,7 @@ export default function PlayerPage() {
         </button>
 
         {/* Artwork */}
-        <div className="relative w-48 h-48 md:w-72 md:h-72 mb-6 md:mb-8 shadow-2xl rounded-2xl overflow-hidden">
+        <div className="relative flex-shrink-0 w-48 h-48 md:w-72 md:h-72 mb-6 md:mb-8 shadow-2xl rounded-2xl overflow-hidden">
           <Image
             src={currentEpisode.podcastArtworkUrl}
             alt={currentEpisode.title}
@@ -219,6 +235,50 @@ export default function PlayerPage() {
             <Volume2 className="w-5 h-5" />
           </button>
         </div>
+
+        {/* Queue - below the controls on mobile (desktop uses the sidebar) */}
+        <section className="md:hidden w-full max-w-lg mt-8 pt-6 border-t border-gray-200 dark:border-zinc-800">
+          <h3 className="text-sm font-semibold text-gray-800 dark:text-white mb-3 flex items-center gap-2">
+            <ListMusic className="w-4 h-4 text-light-primary dark:text-sky-400" />
+            Queue ({upcomingEpisodes.length})
+          </h3>
+          {upcomingEpisodes.length > 0 ? (
+            <div className="space-y-1">
+              {upcomingEpisodes.map((episode) => (
+                <button
+                  key={episode.id}
+                  onClick={() => play(episode)}
+                  className="w-full flex items-center gap-3 p-2 rounded-xl text-left transition-colors active:bg-gray-100 dark:active:bg-zinc-800"
+                >
+                  <div className="relative w-12 h-12 rounded-lg overflow-hidden shadow-md flex-shrink-0">
+                    <Image
+                      src={episode.podcastArtworkUrl}
+                      alt={episode.title}
+                      fill
+                      className="object-cover"
+                    />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-800 dark:text-zinc-200 line-clamp-2 leading-tight">
+                      {episode.title}
+                    </p>
+                    <p className="text-xs text-gray-500 dark:text-zinc-500 mt-1 truncate">
+                      {episode.podcastTitle}
+                    </p>
+                  </div>
+                  <span className="text-xs text-gray-400 dark:text-zinc-500 flex-shrink-0">
+                    <DurationLabel seconds={episode.duration} />
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-6">
+              <p className="text-sm text-gray-400 dark:text-zinc-500">Queue is empty</p>
+              <p className="text-xs text-gray-400 dark:text-zinc-600 mt-1">Use &quot;Play All&quot; to add episodes</p>
+            </div>
+          )}
+        </section>
       </div>
 
       {/* Queue Sidebar - Hidden on mobile, expands on hover on desktop */}
@@ -267,25 +327,7 @@ export default function PlayerPage() {
                       {episode.podcastTitle}
                     </p>
                     <p className="text-xs text-gray-400 dark:text-zinc-600 mt-0.5">
-                      {(() => {
-                        const { hours, minutes } = getDurationParts(episode.duration);
-                        if (hours > 0) {
-                          return (
-                            <span>
-                              <span className="font-semibold text-gray-600 dark:text-zinc-400">{hours}</span>
-                              <span className="ml-0.5">hr</span>
-                              <span className="font-semibold text-gray-600 dark:text-zinc-400 ml-1">{minutes}</span>
-                              <span className="ml-0.5">min</span>
-                            </span>
-                          );
-                        }
-                        return (
-                          <span>
-                            <span className="font-semibold text-gray-600 dark:text-zinc-400">{minutes}</span>
-                            <span className="ml-0.5">min</span>
-                          </span>
-                        );
-                      })()}
+                      <DurationLabel seconds={episode.duration} />
                     </p>
                   </div>
                 </button>
@@ -294,7 +336,7 @@ export default function PlayerPage() {
           ) : (
             <div className="text-center py-8">
               <p className="text-sm text-gray-400 dark:text-zinc-500">Queue is empty</p>
-              <p className="text-xs text-gray-400 dark:text-zinc-600 mt-1">Use "Play All" to add episodes</p>
+              <p className="text-xs text-gray-400 dark:text-zinc-600 mt-1">Use &quot;Play All&quot; to add episodes</p>
             </div>
           )}
           </div>
