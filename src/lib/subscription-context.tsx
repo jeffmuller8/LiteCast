@@ -12,6 +12,7 @@ export interface Podcast {
   description: string;
   artworkUrl: string;
   feedUrl: string;
+  subscribedAt?: string; // ISO time; compared against unsubscribe times when syncing devices
 }
 
 export interface Episode {
@@ -47,7 +48,11 @@ interface UserData {
   bookmarkedEpisodeIds: string[];
   pinnedPodcastIds: string[];
   listeningStats: ListeningStats[];
+  unsubscribedAt?: UnsubscribeLog;
 }
+
+// podcastId -> ISO time it was last unsubscribed, so removals sync across devices
+type UnsubscribeLog = Record<string, string>;
 
 interface SubscriptionContextType {
   podcasts: Podcast[];
@@ -107,6 +112,22 @@ function toEpisode(ep: FeedEpisode, podcast: Podcast): Episode {
 // How many feeds to refresh at once on load
 const FEED_REFRESH_CONCURRENCY = 4;
 
+// Combines two unsubscribe logs, keeping the latest time for each podcast
+function mergeUnsubscribeLogs(a: UnsubscribeLog = {}, b: UnsubscribeLog = {}): UnsubscribeLog {
+  const merged = { ...a };
+  for (const [id, time] of Object.entries(b)) {
+    if (!merged[id] || time > merged[id]) merged[id] = time;
+  }
+  return merged;
+}
+
+// A podcast is gone if it was unsubscribed after it was (last) subscribed.
+// Podcasts saved before subscribedAt existed count as subscribed at the epoch.
+function wasUnsubscribed(podcast: Podcast, log: UnsubscribeLog): boolean {
+  const removedAt = log[podcast.id];
+  return !!removedAt && (podcast.subscribedAt ?? "") < removedAt;
+}
+
 export function SubscriptionProvider({ children }: { children: ReactNode }) {
   const { user, loading: authLoading } = useAuth();
   const [podcasts, setPodcasts] = useState<Podcast[]>([]);
@@ -115,12 +136,21 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
   const [bookmarkedEpisodeIds, setBookmarkedEpisodeIds] = useState<string[]>([]);
   const [pinnedPodcastIds, setPinnedPodcastIds] = useState<string[]>([]);
   const [listeningStats, setListeningStats] = useState<ListeningStats[]>([]);
+  const [unsubscribedAt, setUnsubscribedAt] = useState<UnsubscribeLog>({});
+  const unsubscribedAtRef = useRef<UnsubscribeLog>({});
+  const podcastsRef = useRef<Podcast[]>([]);
   const [isHydrated, setIsHydrated] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const isSyncingRef = useRef(false);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const firestoreErrorCount = useRef(0);
   const refreshedForUserRef = useRef<string | null>(null);
+
+  // The Firestore listener reads the latest values without re-subscribing
+  useEffect(() => {
+    unsubscribedAtRef.current = unsubscribedAt;
+    podcastsRef.current = podcasts;
+  }, [unsubscribedAt, podcasts]);
 
   // Save to Firestore when user is logged in
   const saveToFirestore = useCallback(async (data: UserData) => {
@@ -166,6 +196,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
         bookmarkedEpisodeIds: data.bookmarkedEpisodeIds,
         pinnedPodcastIds: data.pinnedPodcastIds || [],
         listeningStats: data.listeningStats || [],
+        unsubscribedAt: data.unsubscribedAt || {},
         updatedAt: new Date().toISOString(),
       });
 
@@ -186,6 +217,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
             bookmarkedEpisodeIds: data.bookmarkedEpisodeIds,
             pinnedPodcastIds: data.pinnedPodcastIds || [],
             listeningStats: data.listeningStats || [],
+            unsubscribedAt: data.unsubscribedAt || {},
             updatedAt: new Date().toISOString(),
             note: "Episodes stored locally only due to size limits",
           });
@@ -218,6 +250,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
           const savedBookmarks = localStorage.getItem("litecast-bookmarks");
           const savedPinned = localStorage.getItem("litecast-pinned");
           const savedStats = localStorage.getItem("litecast-listening-stats");
+          const savedUnsubscribed = localStorage.getItem("litecast-unsubscribed");
 
           const localData: UserData = {
             podcasts: savedPodcasts ? JSON.parse(savedPodcasts) : [],
@@ -226,6 +259,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
             bookmarkedEpisodeIds: savedBookmarks ? JSON.parse(savedBookmarks) : [],
             pinnedPodcastIds: savedPinned ? JSON.parse(savedPinned) : [],
             listeningStats: savedStats ? JSON.parse(savedStats) : [],
+            unsubscribedAt: savedUnsubscribed ? JSON.parse(savedUnsubscribed) : {},
           };
 
           if (docSnap.exists()) {
@@ -237,8 +271,12 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
             const localPodcastIds = new Set(localData.podcasts.map(p => p.id));
             const cloudOnlyPodcasts = cloudPodcasts.filter(p => !localPodcastIds.has(p.id));
 
-            // Merge podcasts (local + any cloud-only podcasts)
-            const mergedPodcasts = [...localData.podcasts, ...cloudOnlyPodcasts];
+            // Merge podcasts (local + any cloud-only podcasts), then drop any
+            // unsubscribed on either device after they were subscribed
+            const mergedUnsubscribed = mergeUnsubscribeLogs(localData.unsubscribedAt, cloudData.unsubscribedAt);
+            const mergedPodcasts = [...localData.podcasts, ...cloudOnlyPodcasts]
+              .filter(p => !wasUnsubscribed(p, mergedUnsubscribed));
+            const keptPodcastIds = new Set(mergedPodcasts.map(p => p.id));
 
             // For episodes: always prefer localStorage (has full descriptions)
             // Only use cloud episodes for podcasts we don't have locally
@@ -246,7 +284,8 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
             const cloudOnlyEpisodes = (cloudData.episodes || []).filter(
               e => !localEpisodePodcastIds.has(e.podcastId)
             );
-            const mergedEpisodes = [...localData.episodes, ...cloudOnlyEpisodes];
+            const mergedEpisodes = [...localData.episodes, ...cloudOnlyEpisodes]
+              .filter(e => keptPodcastIds.has(e.podcastId));
 
             // Merge playback progress (union, prefer local for conflicts)
             const localProgressIds = new Set(localData.playbackProgress.map(p => p.episodeId));
@@ -265,7 +304,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
             const mergedPinned = [...new Set([
               ...localData.pinnedPodcastIds,
               ...(cloudData.pinnedPodcastIds || [])
-            ])];
+            ])].filter(id => keptPodcastIds.has(id));
 
             // Merge listening stats (prefer local, add cloud-only)
             const localStatsIds = new Set(localData.listeningStats.map(s => s.podcastId));
@@ -280,6 +319,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
             setBookmarkedEpisodeIds(mergedBookmarks);
             setPinnedPodcastIds(mergedPinned);
             setListeningStats(mergedStats);
+            setUnsubscribedAt(mergedUnsubscribed);
 
             console.log(`Loaded: ${mergedPodcasts.length} podcasts, ${mergedEpisodes.length} episodes`);
           } else {
@@ -290,6 +330,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
             setBookmarkedEpisodeIds(localData.bookmarkedEpisodeIds);
             setPinnedPodcastIds(localData.pinnedPodcastIds);
             setListeningStats(localData.listeningStats);
+            setUnsubscribedAt(localData.unsubscribedAt || {});
 
             console.log(`Loaded from localStorage: ${localData.podcasts.length} podcasts, ${localData.episodes.length} episodes`);
           }
@@ -302,6 +343,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
           const savedBookmarks = localStorage.getItem("litecast-bookmarks");
           const savedPinned = localStorage.getItem("litecast-pinned");
           const savedStats = localStorage.getItem("litecast-listening-stats");
+          const savedUnsubscribed = localStorage.getItem("litecast-unsubscribed");
 
           if (savedPodcasts) setPodcasts(JSON.parse(savedPodcasts));
           if (savedEpisodes) setEpisodes(JSON.parse(savedEpisodes));
@@ -309,6 +351,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
           if (savedBookmarks) setBookmarkedEpisodeIds(JSON.parse(savedBookmarks));
           if (savedPinned) setPinnedPodcastIds(JSON.parse(savedPinned));
           if (savedStats) setListeningStats(JSON.parse(savedStats));
+          if (savedUnsubscribed) setUnsubscribedAt(JSON.parse(savedUnsubscribed));
         } finally {
           setIsSyncing(false);
           isSyncingRef.current = false;
@@ -321,6 +364,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
         const savedBookmarks = localStorage.getItem("litecast-bookmarks");
         const savedPinned = localStorage.getItem("litecast-pinned");
         const savedStats = localStorage.getItem("litecast-listening-stats");
+        const savedUnsubscribed = localStorage.getItem("litecast-unsubscribed");
 
         if (savedPodcasts) setPodcasts(JSON.parse(savedPodcasts));
         if (savedEpisodes) setEpisodes(JSON.parse(savedEpisodes));
@@ -328,6 +372,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
         if (savedBookmarks) setBookmarkedEpisodeIds(JSON.parse(savedBookmarks));
         if (savedPinned) setPinnedPodcastIds(JSON.parse(savedPinned));
         if (savedStats) setListeningStats(JSON.parse(savedStats));
+        if (savedUnsubscribed) setUnsubscribedAt(JSON.parse(savedUnsubscribed));
       }
 
       setIsHydrated(true);
@@ -394,29 +439,39 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
       if (docSnap.exists() && !isSyncingRef.current) {
         const cloudData = docSnap.data() as UserData;
 
-        // Only update if cloud has MORE podcasts than local (indicates sync from another device)
-        // This prevents cloud data (with limited episodes) from overwriting local data
+        // Apply unsubscribes made on other devices, and add podcasts subscribed there
+        const log = mergeUnsubscribeLogs(unsubscribedAtRef.current, cloudData.unsubscribedAt);
+        setUnsubscribedAt(log);
+
+        const cloudPodcasts = (cloudData.podcasts || []).filter(p => !wasUnsubscribed(p, log));
+        const cloudPodcastIds = new Set(cloudPodcasts.map(p => p.id));
+        const removedHere = new Set(
+          podcastsRef.current.filter(p => wasUnsubscribed(p, log)).map(p => p.id)
+        );
+
         setPodcasts(currentPodcasts => {
-          if ((cloudData.podcasts?.length || 0) > currentPodcasts.length) {
-            // Cloud has more podcasts - merge them
-            const localIds = new Set(currentPodcasts.map(p => p.id));
-            const newPodcasts = (cloudData.podcasts || []).filter(p => !localIds.has(p.id));
-            return [...currentPodcasts, ...newPodcasts];
-          }
-          return currentPodcasts;
+          const localIds = new Set(currentPodcasts.map(p => p.id));
+          const newPodcasts = cloudPodcasts.filter(p => !localIds.has(p.id));
+          const kept = currentPodcasts.filter(p => !wasUnsubscribed(p, log));
+          if (newPodcasts.length === 0 && kept.length === currentPodcasts.length) return currentPodcasts;
+          return [...kept, ...newPodcasts];
         });
 
         // Don't overwrite episodes from cloud (local has full data)
-        // Only add episodes for new podcasts we don't have
+        // Only add episodes for new podcasts we don't have, and drop removed podcasts' episodes
         setEpisodes(currentEpisodes => {
           const localPodcastIds = new Set(currentEpisodes.map(e => e.podcastId));
           const newEpisodes = (cloudData.episodes || []).filter(
-            e => !localPodcastIds.has(e.podcastId)
+            e => !localPodcastIds.has(e.podcastId) && cloudPodcastIds.has(e.podcastId)
           );
-          if (newEpisodes.length > 0) {
-            return [...currentEpisodes, ...newEpisodes];
-          }
-          return currentEpisodes;
+          const kept = currentEpisodes.filter(e => !removedHere.has(e.podcastId));
+          if (newEpisodes.length === 0 && kept.length === currentEpisodes.length) return currentEpisodes;
+          return [...kept, ...newEpisodes];
+        });
+
+        setPinnedPodcastIds(currentPinned => {
+          const kept = currentPinned.filter(id => !removedHere.has(id));
+          return kept.length === currentPinned.length ? currentPinned : kept;
         });
 
         // Merge playback progress (cloud may have progress from other devices)
@@ -450,7 +505,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
     // Don't save until hydrated and auth is done loading
     if (!isHydrated || authLoading) return;
 
-    const data: UserData = { podcasts, episodes, playbackProgress, bookmarkedEpisodeIds, pinnedPodcastIds, listeningStats };
+    const data: UserData = { podcasts, episodes, playbackProgress, bookmarkedEpisodeIds, pinnedPodcastIds, listeningStats, unsubscribedAt };
 
     // Always save to localStorage as immediate backup
     try {
@@ -460,6 +515,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
       localStorage.setItem("litecast-bookmarks", JSON.stringify(bookmarkedEpisodeIds));
       localStorage.setItem("litecast-pinned", JSON.stringify(pinnedPodcastIds));
       localStorage.setItem("litecast-listening-stats", JSON.stringify(listeningStats));
+      localStorage.setItem("litecast-unsubscribed", JSON.stringify(unsubscribedAt));
       console.log(`LocalStorage saved: ${podcasts.length} podcasts, ${episodes.length} episodes`);
     } catch (error: any) {
       console.error("LocalStorage save failed:", error?.message || error);
@@ -469,6 +525,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
           localStorage.setItem("litecast-podcasts", JSON.stringify(podcasts));
           localStorage.setItem("litecast-progress", JSON.stringify(playbackProgress));
           localStorage.setItem("litecast-pinned", JSON.stringify(pinnedPodcastIds));
+          localStorage.setItem("litecast-unsubscribed", JSON.stringify(unsubscribedAt));
           console.warn("LocalStorage quota exceeded - saved podcasts only, episodes may be incomplete");
         } catch (e) {
           console.error("Even minimal save failed:", e);
@@ -491,7 +548,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
         clearTimeout(saveTimeoutRef.current);
       }
     };
-  }, [podcasts, episodes, playbackProgress, bookmarkedEpisodeIds, pinnedPodcastIds, listeningStats, isHydrated, authLoading, user, saveToFirestore]);
+  }, [podcasts, episodes, playbackProgress, bookmarkedEpisodeIds, pinnedPodcastIds, listeningStats, unsubscribedAt, isHydrated, authLoading, user, saveToFirestore]);
 
   const subscribe = async (podcast: Podcast, feedUrl: string) => {
     if (podcasts.some((p) => p.id === podcast.id)) return;
@@ -505,7 +562,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      const newPodcast: Podcast = { ...podcast, feedUrl };
+      const newPodcast: Podcast = { ...podcast, feedUrl, subscribedAt: new Date().toISOString() };
       const newEpisodes: Episode[] = (data.episodes || []).map((ep: FeedEpisode) => toEpisode(ep, newPodcast));
 
       setPodcasts((prev) => [...prev, newPodcast]);
@@ -518,6 +575,9 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
   const unsubscribe = (podcastId: string) => {
     setPodcasts((prev) => prev.filter((p) => p.id !== podcastId));
     setEpisodes((prev) => prev.filter((e) => e.podcastId !== podcastId));
+    setPinnedPodcastIds((prev) => prev.filter((id) => id !== podcastId));
+    // Recorded so other devices drop it too instead of syncing it back
+    setUnsubscribedAt((prev) => ({ ...prev, [podcastId]: new Date().toISOString() }));
   };
 
   const isSubscribed = (podcastId: string) => {
