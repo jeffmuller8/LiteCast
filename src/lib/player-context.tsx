@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useState, useRef, useEffect, useSyncExternalStore, ReactNode } from "react";
+import { useSubscriptions } from "./subscription-context";
 
 interface Episode {
   id: string;
@@ -72,6 +73,8 @@ function readKeepScreenOn() {
 const noSubscribe = () => () => {};
 const SKIP_BACK_SECONDS = 10;
 const SKIP_FORWARD_SECONDS = 30;
+// How often (in seconds of playback) to save the listening position
+const PROGRESS_SAVE_INTERVAL = 5;
 
 const PlayerContext = createContext<PlayerContextType | null>(null);
 
@@ -90,6 +93,21 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const playNextRef = useRef<() => void>(() => {});
+
+  // Listening position, saved to the subscription store (drives In Progress and resume)
+  const { playbackProgress, updateProgress } = useSubscriptions();
+  const playbackProgressRef = useRef(playbackProgress);
+  const updateProgressRef = useRef(updateProgress);
+  useEffect(() => {
+    playbackProgressRef.current = playbackProgress;
+    updateProgressRef.current = updateProgress;
+  });
+  // The episode whose position is being tracked; set synchronously when a new one loads
+  const trackedEpisodeRef = useRef<Episode | null>(null);
+  // True while a new episode loads and seeks to its saved spot, so its 0:00 start isn't saved over it
+  const resumePendingRef = useRef(false);
+  const lastSavedTimeRef = useRef(0);
+  const saveProgressRef = useRef<(completed?: boolean) => void>(() => {});
   const keepScreenOn = useSyncExternalStore(subscribeKeepScreenOn, readKeepScreenOn, () => false);
   const wakeLockSupported = useSyncExternalStore(noSubscribe, () => "wakeLock" in navigator, () => false);
 
@@ -124,8 +142,21 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       audio.addEventListener(type, updatePositionState)
     );
 
+    const saveProgress = (completed = false) => {
+      const episode = trackedEpisodeRef.current;
+      if (!episode || resumePendingRef.current) return;
+      const time = audio.currentTime;
+      if (!completed && time < 1) return;
+      lastSavedTimeRef.current = time;
+      updateProgressRef.current(episode.id, time, completed);
+    };
+    saveProgressRef.current = saveProgress;
+
     audio.addEventListener("timeupdate", () => {
       setState((s) => ({ ...s, currentTime: audio.currentTime }));
+      if (!audio.paused && Math.abs(audio.currentTime - lastSavedTimeRef.current) >= PROGRESS_SAVE_INTERVAL) {
+        saveProgress();
+      }
     });
 
     audio.addEventListener("loadedmetadata", () => {
@@ -137,6 +168,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     });
 
     audio.addEventListener("ended", () => {
+      saveProgress(true);
       // Auto-play next episode in queue
       playNextRef.current();
     });
@@ -147,6 +179,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
     audio.addEventListener("pause", () => {
       setState((s) => ({ ...s, isPlaying: false }));
+      saveProgress();
     });
 
     audio.addEventListener("error", (e) => {
@@ -270,6 +303,34 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     };
   }, [keepScreenOn, state.isPlaying]);
 
+  // Loads an episode into the audio element, saving the outgoing episode's position first
+  // and resuming the new one where it was left off. Returns the resume time.
+  const loadEpisode = (audio: HTMLAudioElement, episode: Episode) => {
+    saveProgressRef.current();
+
+    const saved = playbackProgressRef.current.find(
+      (p) => p.episodeId === episode.id && !p.completed && p.currentTime > 0
+    );
+    const resumeAt = saved?.currentTime ?? 0;
+
+    trackedEpisodeRef.current = episode;
+    resumePendingRef.current = true;
+    lastSavedTimeRef.current = resumeAt;
+
+    const finishResume = () => {
+      if (resumeAt > 0 && resumeAt < (audio.duration || Infinity) - 5) {
+        audio.currentTime = resumeAt;
+      }
+      resumePendingRef.current = false;
+    };
+    audio.addEventListener("loadedmetadata", finishResume, { once: true });
+    audio.addEventListener("error", () => { resumePendingRef.current = false; }, { once: true });
+
+    audio.src = episode.audioUrl;
+    audio.load();
+    return resumeAt;
+  };
+
   const play = async (episode: Episode) => {
     if (!audioRef.current) return;
 
@@ -286,15 +347,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
 
     // Load new episode
+    const resumeAt = loadEpisode(audio, episode);
     setState((s) => ({
       ...s,
       currentEpisode: episode,
-      currentTime: 0,
+      currentTime: resumeAt,
       duration: episode.duration || 0,
     }));
-
-    audio.src = episode.audioUrl;
-    audio.load();
 
     try {
       await audio.play();
@@ -364,17 +423,15 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     const audio = audioRef.current;
     const firstEpisode = episodes[0];
 
+    const resumeAt = loadEpisode(audio, firstEpisode);
     setState((s) => ({
       ...s,
       queue: episodes,
       queueIndex: 0,
       currentEpisode: firstEpisode,
-      currentTime: 0,
+      currentTime: resumeAt,
       duration: firstEpisode.duration || 0,
     }));
-
-    audio.src = firstEpisode.audioUrl;
-    audio.load();
 
     try {
       await audio.play();
@@ -395,16 +452,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     const nextEpisode = state.queue[nextIndex];
     const audio = audioRef.current;
 
+    const resumeAt = loadEpisode(audio, nextEpisode);
     setState((s) => ({
       ...s,
       queueIndex: nextIndex,
       currentEpisode: nextEpisode,
-      currentTime: 0,
+      currentTime: resumeAt,
       duration: nextEpisode.duration || 0,
     }));
-
-    audio.src = nextEpisode.audioUrl;
-    audio.load();
 
     try {
       await audio.play();
@@ -422,16 +477,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     const prevEpisode = state.queue[prevIndex];
     const audio = audioRef.current;
 
+    const resumeAt = loadEpisode(audio, prevEpisode);
     setState((s) => ({
       ...s,
       queueIndex: prevIndex,
       currentEpisode: prevEpisode,
-      currentTime: 0,
+      currentTime: resumeAt,
       duration: prevEpisode.duration || 0,
     }));
-
-    audio.src = prevEpisode.audioUrl;
-    audio.load();
 
     try {
       await audio.play();
