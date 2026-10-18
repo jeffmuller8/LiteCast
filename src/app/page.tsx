@@ -137,11 +137,6 @@ export default function Home() {
             }`}
           >
             <span className="relative z-10">New Releases</span>
-            {newReleases.length > 0 && (
-              <span className="relative z-10 ml-2 px-2 py-0.5 text-xs rounded-full bg-light-primary dark:bg-sky-600 text-white">
-                {newReleases.length}
-              </span>
-            )}
           </button>
           <button
             ref={(el) => { buttonRefs.current[1] = el; }}

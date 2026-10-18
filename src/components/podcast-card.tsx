@@ -13,22 +13,33 @@ interface Podcast {
 
 interface PodcastCardProps {
   podcast: Podcast;
+  newEpisodeCount?: number;
 }
 
-export function PodcastCard({ podcast }: PodcastCardProps) {
+export function PodcastCard({ podcast, newEpisodeCount = 0 }: PodcastCardProps) {
   return (
     <Link
       href={`/podcast/${podcast.id}`}
       className="group block"
     >
-      <div className="relative aspect-square rounded-lg overflow-hidden mb-3 border border-gray-300 dark:border-zinc-700 shadow-sm group-hover:shadow-md dark:shadow-black/10 dark:group-hover:shadow-black/20 transition-shadow">
-        <Image
-          src={podcast.artworkUrl}
-          alt={podcast.title}
-          fill
-          className="object-cover group-hover:scale-105 transition-transform duration-300"
-          unoptimized
-        />
+      <div className="relative mb-3">
+        <div className="relative aspect-square rounded-lg overflow-hidden border border-gray-300 dark:border-zinc-700 shadow-sm group-hover:shadow-md dark:shadow-black/10 dark:group-hover:shadow-black/20 transition-shadow">
+          <Image
+            src={podcast.artworkUrl}
+            alt={podcast.title}
+            fill
+            className="object-cover group-hover:scale-105 transition-transform duration-300"
+            unoptimized
+          />
+        </div>
+        {newEpisodeCount > 0 && (
+          <span
+            className="absolute -top-2 -right-2 min-w-[24px] h-6 px-1.5 flex items-center justify-center rounded-full bg-light-primary dark:bg-sky-600 text-white text-xs font-semibold shadow-md ring-2 ring-light-bg dark:ring-zinc-950"
+            aria-label={`${newEpisodeCount} new episode${newEpisodeCount === 1 ? "" : "s"}`}
+          >
+            {newEpisodeCount > 99 ? "99+" : newEpisodeCount}
+          </span>
+        )}
       </div>
       <h3 className="font-medium text-light-text dark:text-white truncate group-hover:text-light-primary dark:group-hover:text-sky-400 transition-colors">
         {podcast.title}

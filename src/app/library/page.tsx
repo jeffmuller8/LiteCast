@@ -5,7 +5,7 @@ import { useSubscriptions } from "@/lib/subscription-context";
 import { Library, Loader2 } from "lucide-react";
 
 export default function LibraryPage() {
-  const { podcasts, isHydrated } = useSubscriptions();
+  const { podcasts, isHydrated, getNewEpisodeCount } = useSubscriptions();
 
   if (!isHydrated) {
     return (
@@ -39,7 +39,7 @@ export default function LibraryPage() {
               className="animate-fadeIn"
               style={{ animationDelay: `${index * 60}ms` }}
             >
-              <PodcastCard podcast={podcast} />
+              <PodcastCard podcast={podcast} newEpisodeCount={getNewEpisodeCount(podcast.id)} />
             </div>
           ))}
         </div>

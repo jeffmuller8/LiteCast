@@ -66,6 +66,7 @@ interface SubscriptionContextType {
   unsubscribe: (podcastId: string) => void;
   isSubscribed: (podcastId: string) => boolean;
   getNewReleases: (sortBy?: NewReleasesSortOption) => Episode[];
+  getNewEpisodeCount: (podcastId: string) => number;
   getInProgressEpisodes: () => (Episode & { progress: number })[];
   getBookmarkedEpisodes: () => Episode[];
   updateProgress: (episodeId: string, currentTime: number, completed: boolean) => void;
@@ -640,6 +641,23 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // Unplayed episodes released since the newest one you've played from this show.
+  // A show you've never played counts 1 (its latest), matching New Releases,
+  // rather than its whole back catalog.
+  const getNewEpisodeCount = (podcastId: string): number => {
+    const startedIds = new Set(playbackProgress.map((p) => p.episodeId));
+    const podcastEpisodes = episodes.filter((ep) => ep.podcastId === podcastId);
+    const unplayed = podcastEpisodes.filter((ep) => !startedIds.has(ep.id));
+    if (unplayed.length === 0) return 0;
+
+    const lastPlayedAt = podcastEpisodes
+      .filter((ep) => startedIds.has(ep.id))
+      .reduce((latest, ep) => Math.max(latest, new Date(ep.publishedAt).getTime()), 0);
+    if (lastPlayedAt === 0) return 1;
+
+    return unplayed.filter((ep) => new Date(ep.publishedAt).getTime() > lastPlayedAt).length;
+  };
+
   const getInProgressEpisodes = (): (Episode & { progress: number })[] => {
     const inProgressIds = playbackProgress
       .filter((p) => !p.completed && p.currentTime > 0)
@@ -784,6 +802,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
         isSubscribed,
         getNewReleases,
         getInProgressEpisodes,
+        getNewEpisodeCount,
         getBookmarkedEpisodes,
         updateProgress,
         toggleBookmark,
