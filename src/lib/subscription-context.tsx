@@ -68,6 +68,7 @@ interface SubscriptionContextType {
   isSubscribed: (podcastId: string) => boolean;
   getNewReleases: (sortBy?: NewReleasesSortOption) => Episode[];
   getNewEpisodeCount: (podcastId: string) => number;
+  getSortedPodcasts: (sortBy: NewReleasesSortOption) => Podcast[];
   getInProgressEpisodes: () => (Episode & { progress: number })[];
   getBookmarkedEpisodes: () => Episode[];
   updateProgress: (episodeId: string, currentTime: number, completed: boolean) => void;
@@ -657,6 +658,43 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
     return unplayed.filter((ep) => new Date(ep.publishedAt).getTime() > lastPlayedAt).length;
   };
 
+  // Library order, using the same options as New Releases but applied per show
+  // (Newest/Oldest go by each show's most recent episode).
+  const getSortedPodcasts = (sortBy: NewReleasesSortOption): Podcast[] => {
+    const latestEpisodeAt = new Map<string, number>();
+    for (const ep of episodes) {
+      const time = new Date(ep.publishedAt).getTime();
+      if (time > (latestEpisodeAt.get(ep.podcastId) ?? 0)) latestEpisodeAt.set(ep.podcastId, time);
+    }
+    const newestFirst = (a: Podcast, b: Podcast) =>
+      (latestEpisodeAt.get(b.id) ?? 0) - (latestEpisodeAt.get(a.id) ?? 0);
+    const listenScore = (podcastId: string) => {
+      const stats = listeningStats.find((s) => s.podcastId === podcastId);
+      return stats ? stats.playCount + stats.totalTimeListened / 3600 : 0;
+    };
+
+    const sorted = [...podcasts];
+    switch (sortBy) {
+      case "newest":
+        return sorted.sort(newestFirst);
+      case "pinned":
+        return sorted.sort((a, b) => {
+          const aPinned = pinnedPodcastIds.includes(a.id);
+          const bPinned = pinnedPodcastIds.includes(b.id);
+          if (aPinned !== bPinned) return aPinned ? -1 : 1;
+          return newestFirst(a, b);
+        });
+      case "most-listened":
+        return sorted.sort((a, b) => listenScore(b.id) - listenScore(a.id) || newestFirst(a, b));
+      case "oldest":
+        return sorted.sort((a, b) => newestFirst(b, a));
+      case "a-z":
+        return sorted.sort((a, b) => a.title.localeCompare(b.title));
+      default:
+        return sorted;
+    }
+  };
+
   const getInProgressEpisodes = (): (Episode & { progress: number })[] => {
     const inProgressIds = playbackProgress
       .filter((p) => !p.completed && p.currentTime > 0)
@@ -803,6 +841,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
         getNewReleases,
         getInProgressEpisodes,
         getNewEpisodeCount,
+        getSortedPodcasts,
         getBookmarkedEpisodes,
         updateProgress,
         toggleBookmark,

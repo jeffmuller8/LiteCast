@@ -50,14 +50,14 @@ export function PodcastCard({ podcast, newEpisodeCount = 0 }: PodcastCardProps) 
 }
 
 // Compact list row for the mobile library. The count sits at the end of the row,
-// since a corner badge would cover most of a 30px thumbnail.
+// since a corner badge would cover much of a small thumbnail.
 export function PodcastListRow({ podcast, newEpisodeCount = 0 }: PodcastCardProps) {
   return (
     <Link
       href={`/podcast/${podcast.id}`}
       className="flex items-center gap-3 py-2.5 group"
     >
-      <div className="relative w-[30px] h-[30px] flex-shrink-0 rounded-md overflow-hidden border border-gray-300 dark:border-zinc-700">
+      <div className="relative w-[50px] h-[50px] flex-shrink-0 rounded-lg overflow-hidden border border-gray-300 dark:border-zinc-700">
         <Image
           src={podcast.artworkUrl}
           alt={podcast.title}
