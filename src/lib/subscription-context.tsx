@@ -32,6 +32,7 @@ export interface PlaybackProgress {
   episodeId: string;
   currentTime: number;
   completed: boolean;
+  updatedAt?: string; // ISO time of the last save; the newest wins when devices merge
 }
 
 export interface ListeningStats {
@@ -113,6 +114,21 @@ function toEpisode(ep: FeedEpisode, podcast: Podcast): Episode {
 // How many feeds to refresh at once on load
 const FEED_REFRESH_CONCURRENCY = 4;
 
+// Merges listening positions from two devices, keeping the most recently saved one
+// per episode. Returns `current` itself when nothing changes, so React skips a re-render.
+function mergeProgress(current: PlaybackProgress[], incoming: PlaybackProgress[] = []): PlaybackProgress[] {
+  const byId = new Map(current.map((p) => [p.episodeId, p]));
+  let changed = false;
+  for (const p of incoming) {
+    const existing = byId.get(p.episodeId);
+    if (!existing || (p.updatedAt ?? "") > (existing.updatedAt ?? "")) {
+      byId.set(p.episodeId, p);
+      changed = true;
+    }
+  }
+  return changed ? Array.from(byId.values()) : current;
+}
+
 // Combines two unsubscribe logs, keeping the latest time for each podcast
 function mergeUnsubscribeLogs(a: UnsubscribeLog = {}, b: UnsubscribeLog = {}): UnsubscribeLog {
   const merged = { ...a };
@@ -164,9 +180,14 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
     }
 
     try {
-      // Aggressively reduce episode data for Firestore (1MB limit)
-      // Only keep essential fields, remove descriptions entirely for cloud storage
-      const minimalEpisodes = data.episodes.map(ep => ({
+      // Firestore documents max out at 1MB, and feeds are refetched on every load, so the
+      // cloud copy only keeps episodes another device can't get from the feed's latest list:
+      // ones you've started (In Progress, resume) or bookmarked. Descriptions are dropped.
+      const referencedIds = new Set([
+        ...data.playbackProgress.filter(p => !p.completed).map(p => p.episodeId),
+        ...data.bookmarkedEpisodeIds,
+      ]);
+      const minimalEpisodes = data.episodes.filter(ep => referencedIds.has(ep.id)).map(ep => ({
         id: ep.id,
         podcastId: ep.podcastId,
         title: ep.title,
@@ -179,20 +200,9 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
         // Omit transcriptUrl to save space
       }));
 
-      // Limit to most recent 100 episodes per podcast to avoid size issues
-      const podcastEpisodeCounts = new Map<string, number>();
-      const limitedEpisodes = minimalEpisodes.filter(ep => {
-        const count = podcastEpisodeCounts.get(ep.podcastId) || 0;
-        if (count < 100) {
-          podcastEpisodeCounts.set(ep.podcastId, count + 1);
-          return true;
-        }
-        return false;
-      });
-
       await setDoc(doc(db, "users", user.uid), {
         podcasts: data.podcasts,
-        episodes: limitedEpisodes,
+        episodes: minimalEpisodes,
         playbackProgress: data.playbackProgress,
         bookmarkedEpisodeIds: data.bookmarkedEpisodeIds,
         pinnedPodcastIds: data.pinnedPodcastIds || [],
@@ -203,7 +213,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
 
       // Reset error count on success
       firestoreErrorCount.current = 0;
-      console.log(`Firestore save successful: ${data.podcasts.length} podcasts, ${limitedEpisodes.length} episodes`);
+      console.log(`Firestore save successful: ${data.podcasts.length} podcasts, ${minimalEpisodes.length} episodes`);
     } catch (error: any) {
       console.error("Error saving to Firestore:", error?.message || error);
       firestoreErrorCount.current++;
@@ -222,6 +232,8 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
             updatedAt: new Date().toISOString(),
             note: "Episodes stored locally only due to size limits",
           });
+          // The save went through, so don't count it toward disabling cloud saves
+          firestoreErrorCount.current = 0;
           console.log("Firestore fallback save (podcasts only) successful");
         } catch (fallbackError) {
           console.error("Firestore fallback save also failed:", fallbackError);
@@ -279,21 +291,17 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
               .filter(p => !wasUnsubscribed(p, mergedUnsubscribed));
             const keptPodcastIds = new Set(mergedPodcasts.map(p => p.id));
 
-            // For episodes: always prefer localStorage (has full descriptions)
-            // Only use cloud episodes for podcasts we don't have locally
-            const localEpisodePodcastIds = new Set(localData.episodes.map(e => e.podcastId));
+            // For episodes: prefer localStorage (has full descriptions); add cloud episodes we
+            // don't have (the ones started or bookmarked on another device)
+            const localEpisodeIds = new Set(localData.episodes.map(e => e.id));
             const cloudOnlyEpisodes = (cloudData.episodes || []).filter(
-              e => !localEpisodePodcastIds.has(e.podcastId)
+              e => !localEpisodeIds.has(e.id)
             );
             const mergedEpisodes = [...localData.episodes, ...cloudOnlyEpisodes]
               .filter(e => keptPodcastIds.has(e.podcastId));
 
-            // Merge playback progress (union, prefer local for conflicts)
-            const localProgressIds = new Set(localData.playbackProgress.map(p => p.episodeId));
-            const cloudOnlyProgress = (cloudData.playbackProgress || []).filter(
-              p => !localProgressIds.has(p.episodeId)
-            );
-            const mergedProgress = [...localData.playbackProgress, ...cloudOnlyProgress];
+            // Merge playback progress: the most recently saved position per episode wins
+            const mergedProgress = mergeProgress(localData.playbackProgress, cloudData.playbackProgress);
 
             // Merge bookmarks (union)
             const mergedBookmarks = [...new Set([
@@ -459,11 +467,11 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
         });
 
         // Don't overwrite episodes from cloud (local has full data)
-        // Only add episodes for new podcasts we don't have, and drop removed podcasts' episodes
+        // Only add cloud episodes we don't have, and drop removed podcasts' episodes
         setEpisodes(currentEpisodes => {
-          const localPodcastIds = new Set(currentEpisodes.map(e => e.podcastId));
+          const localEpisodeIds = new Set(currentEpisodes.map(e => e.id));
           const newEpisodes = (cloudData.episodes || []).filter(
-            e => !localPodcastIds.has(e.podcastId) && cloudPodcastIds.has(e.podcastId)
+            e => !localEpisodeIds.has(e.id) && cloudPodcastIds.has(e.podcastId)
           );
           const kept = currentEpisodes.filter(e => !removedHere.has(e.podcastId));
           if (newEpisodes.length === 0 && kept.length === currentEpisodes.length) return currentEpisodes;
@@ -475,17 +483,8 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
           return kept.length === currentPinned.length ? currentPinned : kept;
         });
 
-        // Merge playback progress (cloud may have progress from other devices)
-        setPlaybackProgress(currentProgress => {
-          const localIds = new Set(currentProgress.map(p => p.episodeId));
-          const newProgress = (cloudData.playbackProgress || []).filter(
-            p => !localIds.has(p.episodeId)
-          );
-          if (newProgress.length > 0) {
-            return [...currentProgress, ...newProgress];
-          }
-          return currentProgress;
-        });
+        // Merge playback progress from other devices: newest position per episode wins
+        setPlaybackProgress(currentProgress => mergeProgress(currentProgress, cloudData.playbackProgress));
 
         // Merge bookmarks
         setBookmarkedEpisodeIds(currentBookmarks => {
@@ -676,14 +675,15 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
   };
 
   const updateProgress = (episodeId: string, currentTime: number, completed: boolean) => {
+    const updatedAt = new Date().toISOString();
     setPlaybackProgress((prev) => {
       const existing = prev.find((p) => p.episodeId === episodeId);
       if (existing) {
         return prev.map((p) =>
-          p.episodeId === episodeId ? { ...p, currentTime, completed } : p
+          p.episodeId === episodeId ? { ...p, currentTime, completed, updatedAt } : p
         );
       }
-      return [...prev, { episodeId, currentTime, completed }];
+      return [...prev, { episodeId, currentTime, completed, updatedAt }];
     });
   };
 
