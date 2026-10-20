@@ -1,6 +1,6 @@
 "use client";
 
-import { PodcastCard } from "@/components/podcast-card";
+import { PodcastCard, PodcastListRow } from "@/components/podcast-card";
 import { useSubscriptions } from "@/lib/subscription-context";
 import { Library, Loader2 } from "lucide-react";
 
@@ -30,9 +30,15 @@ export default function LibraryPage() {
         </p>
       </div>
 
-      {/* Podcasts Grid */}
+      {/* Podcasts: compact list on mobile, artwork grid from md up */}
       {podcasts.length > 0 ? (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 md:gap-6">
+        <>
+        <div className="md:hidden divide-y divide-gray-200 dark:divide-zinc-800 animate-fadeIn">
+          {podcasts.map((podcast) => (
+            <PodcastListRow key={podcast.id} podcast={podcast} newEpisodeCount={getNewEpisodeCount(podcast.id)} />
+          ))}
+        </div>
+        <div className="hidden md:grid grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
           {podcasts.map((podcast, index) => (
             <div
               key={podcast.id}
@@ -43,6 +49,7 @@ export default function LibraryPage() {
             </div>
           ))}
         </div>
+        </>
       ) : (
         <div className="flex flex-col items-center justify-center py-20 text-center animate-fadeIn">
           <Library className="w-16 h-16 text-gray-300 dark:text-zinc-700 mb-4" />

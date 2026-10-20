@@ -49,6 +49,41 @@ export function PodcastCard({ podcast, newEpisodeCount = 0 }: PodcastCardProps) 
   );
 }
 
+// Compact list row for the mobile library. The count sits at the end of the row,
+// since a corner badge would cover most of a 30px thumbnail.
+export function PodcastListRow({ podcast, newEpisodeCount = 0 }: PodcastCardProps) {
+  return (
+    <Link
+      href={`/podcast/${podcast.id}`}
+      className="flex items-center gap-3 py-2.5 group"
+    >
+      <div className="relative w-[30px] h-[30px] flex-shrink-0 rounded-md overflow-hidden border border-gray-300 dark:border-zinc-700">
+        <Image
+          src={podcast.artworkUrl}
+          alt={podcast.title}
+          fill
+          className="object-cover"
+          unoptimized
+        />
+      </div>
+      <div className="flex-1 min-w-0">
+        <h3 className="text-sm font-medium text-light-text dark:text-white truncate group-active:text-light-primary dark:group-active:text-sky-400">
+          {podcast.title}
+        </h3>
+        <p className="text-xs text-gray-500 dark:text-zinc-400 truncate">{podcast.author}</p>
+      </div>
+      {newEpisodeCount > 0 && (
+        <span
+          className="min-w-[22px] h-[22px] px-1.5 flex flex-shrink-0 items-center justify-center rounded-full bg-light-primary dark:bg-sky-600 text-white text-xs font-semibold"
+          aria-label={`${newEpisodeCount} new episode${newEpisodeCount === 1 ? "" : "s"}`}
+        >
+          {newEpisodeCount > 99 ? "99+" : newEpisodeCount}
+        </span>
+      )}
+    </Link>
+  );
+}
+
 export function PodcastCardLarge({ podcast }: PodcastCardProps) {
   return (
     <Link
