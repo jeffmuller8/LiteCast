@@ -108,6 +108,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const resumePendingRef = useRef(false);
   const lastSavedTimeRef = useRef(0);
   const saveProgressRef = useRef<(completed?: boolean) => void>(() => {});
+  // Set whenever the app itself pauses or swaps the audio, so a pause we didn't ask
+  // for (e.g. Chrome on Android pausing media when the screen turns off) can be told apart
+  const intentionalPauseRef = useRef(false);
   const keepScreenOn = useSyncExternalStore(subscribeKeepScreenOn, readKeepScreenOn, () => false);
   const wakeLockSupported = useSyncExternalStore(noSubscribe, () => "wakeLock" in navigator, () => false);
 
@@ -120,10 +123,36 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     keepScreenOnListeners.forEach((notify) => notify());
   };
 
-  // Initialize audio element
+  // Initialize audio element. It's attached to the page (hidden) rather than left detached,
+  // so mobile browsers treat it as the page's primary media for background playback.
   useEffect(() => {
     audioRef.current = new Audio();
     const audio = audioRef.current;
+    audio.preload = "auto";
+    audio.setAttribute("playsinline", "");
+    audio.style.display = "none";
+    document.body.appendChild(audio);
+    intentionalPauseRef.current = false;
+
+    // If playback pauses while the page is hidden and we didn't pause it, resume once.
+    // A real interruption (e.g. a phone call) refuses the resume, and we don't retry
+    // until the page has been visible again.
+    let resumedWhileHidden = false;
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") resumedWhileHidden = false;
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    const resumeIfUnexpected = () => {
+      const unexpected = !intentionalPauseRef.current && !audio.ended && !!audio.src;
+      intentionalPauseRef.current = false;
+      if (!unexpected || document.visibilityState !== "hidden" || resumedWhileHidden) return;
+      resumedWhileHidden = true;
+      setTimeout(() => {
+        if (audio.paused && document.visibilityState === "hidden") {
+          audio.play().catch((e) => console.warn("Background resume refused:", e));
+        }
+      }, 300);
+    };
 
     // Keeps the lock-screen scrubber in step; the OS extrapolates between updates
     const updatePositionState = () => {
@@ -180,6 +209,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     audio.addEventListener("pause", () => {
       setState((s) => ({ ...s, isPlaying: false }));
       saveProgress();
+      resumeIfUnexpected();
     });
 
     audio.addEventListener("error", (e) => {
@@ -187,8 +217,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     });
 
     return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      intentionalPauseRef.current = true;
       audio.pause();
       audio.src = "";
+      audio.remove();
     };
   }, []);
 
@@ -214,7 +247,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
     const handlers: [MediaSessionAction, MediaSessionActionHandler][] = [
       ["play", () => { audio()?.play().catch((e) => console.error("Failed to play:", e)); }],
-      ["pause", () => audio()?.pause()],
+      ["pause", () => { intentionalPauseRef.current = true; audio()?.pause(); }],
       ["seekbackward", (details) => {
         const a = audio();
         if (a) a.currentTime = Math.max(a.currentTime - (details.seekOffset || SKIP_BACK_SECONDS), 0);
@@ -315,6 +348,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
     trackedEpisodeRef.current = episode;
     resumePendingRef.current = true;
+    if (!audio.paused) intentionalPauseRef.current = true;
     lastSavedTimeRef.current = resumeAt;
 
     const finishResume = () => {
@@ -368,6 +402,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     const audio = audioRef.current;
 
     if (state.isPlaying) {
+      intentionalPauseRef.current = true;
       audio.pause();
     } else {
       try {
@@ -380,6 +415,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   const pause = () => {
     if (audioRef.current) {
+      intentionalPauseRef.current = true;
       audioRef.current.pause();
     }
   };
