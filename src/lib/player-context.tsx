@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useState, useRef, useEffect, useSyncExternalStore, ReactNode } from "react";
 import { useSubscriptions } from "./subscription-context";
+import { logPlayback } from "./playback-log";
 
 interface Episode {
   id: string;
@@ -134,24 +135,49 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     document.body.appendChild(audio);
     intentionalPauseRef.current = false;
 
-    // If playback pauses while the page is hidden and we didn't pause it, resume once.
-    // A real interruption (e.g. a phone call) refuses the resume, and we don't retry
-    // until the page has been visible again.
+    // Snapshot for the playback log. Chrome's decoded-byte counters show whether it is
+    // treating the stream as video (videoBytes > 0), which Android pauses in the background.
+    const mediaInfo = () => {
+      const media = audio as HTMLAudioElement & {
+        webkitAudioDecodedByteCount?: number;
+        webkitVideoDecodedByteCount?: number;
+      };
+      return {
+        t: Math.round(audio.currentTime),
+        hidden: document.visibilityState === "hidden",
+        ready: audio.readyState,
+        network: audio.networkState,
+        audioBytes: media.webkitAudioDecodedByteCount ?? null,
+        videoBytes: media.webkitVideoDecodedByteCount ?? null,
+      };
+    };
+
+    // If playback pauses while the page is hidden and we didn't pause it, resume once,
+    // right away (timers don't run on a hidden page). A real interruption (e.g. a phone
+    // call) refuses the resume, and we don't retry until the page has been visible again.
     let resumedWhileHidden = false;
     const onVisibilityChange = () => {
+      logPlayback("visibility", { state: document.visibilityState, playing: !audio.paused });
       if (document.visibilityState === "visible") resumedWhileHidden = false;
     };
     document.addEventListener("visibilitychange", onVisibilityChange);
+    // Page lifecycle: freeze/resume fire on document, pagehide/pageshow on window
+    const onLifecycle = (e: Event) => logPlayback(`page-${e.type}`, { playing: !audio.paused });
+    ["freeze", "resume"].forEach((type) => document.addEventListener(type, onLifecycle));
+    ["pagehide", "pageshow"].forEach((type) => window.addEventListener(type, onLifecycle));
+
     const resumeIfUnexpected = () => {
-      const unexpected = !intentionalPauseRef.current && !audio.ended && !!audio.src;
+      const intentional = intentionalPauseRef.current;
       intentionalPauseRef.current = false;
-      if (!unexpected || document.visibilityState !== "hidden" || resumedWhileHidden) return;
+      logPlayback("pause", { ...mediaInfo(), intentional, ended: audio.ended });
+      if (intentional || audio.ended || !audio.src) return;
+      if (document.visibilityState !== "hidden" || resumedWhileHidden) return;
       resumedWhileHidden = true;
-      setTimeout(() => {
-        if (audio.paused && document.visibilityState === "hidden") {
-          audio.play().catch((e) => console.warn("Background resume refused:", e));
-        }
-      }, 300);
+      logPlayback("resume-attempt");
+      audio.play().then(
+        () => logPlayback("resume-ok", mediaInfo()),
+        (e: unknown) => logPlayback("resume-refused", { error: e instanceof Error ? `${e.name}: ${e.message}` : String(e) })
+      );
     };
 
     // Keeps the lock-screen scrubber in step; the OS extrapolates between updates
@@ -204,6 +230,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
     audio.addEventListener("play", () => {
       setState((s) => ({ ...s, isPlaying: true }));
+      logPlayback("play", mediaInfo());
     });
 
     audio.addEventListener("pause", () => {
@@ -214,10 +241,19 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
     audio.addEventListener("error", (e) => {
       console.error("Audio playback error:", e);
+      // Clearing src on teardown raises an "Empty src" error; that one isn't a playback problem
+      if (audio.error && !audio.error.message.includes("Empty src")) {
+        logPlayback("error", { code: audio.error.code, message: audio.error.message });
+      }
     });
+    ["stalled", "waiting"].forEach((type) =>
+      audio.addEventListener(type, () => logPlayback(type, mediaInfo()))
+    );
 
     return () => {
       document.removeEventListener("visibilitychange", onVisibilityChange);
+      ["freeze", "resume"].forEach((type) => document.removeEventListener(type, onLifecycle));
+      ["pagehide", "pageshow"].forEach((type) => window.removeEventListener(type, onLifecycle));
       intentionalPauseRef.current = true;
       audio.pause();
       audio.src = "";
@@ -360,6 +396,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     audio.addEventListener("loadedmetadata", finishResume, { once: true });
     audio.addEventListener("error", () => { resumePendingRef.current = false; }, { once: true });
 
+    try {
+      const url = new URL(episode.audioUrl);
+      logPlayback("load", { host: url.hostname, file: url.pathname.split(".").pop()?.slice(0, 5) ?? "", resumeAt: Math.round(resumeAt) });
+    } catch {
+      logPlayback("load", { resumeAt: Math.round(resumeAt) });
+    }
     audio.src = episode.audioUrl;
     audio.load();
     return resumeAt;

@@ -6,12 +6,15 @@ import { useSubscriptions } from "@/lib/subscription-context";
 import { useToast } from "@/components/toast";
 import { useTheme } from "@/lib/theme-context";
 import { usePlayer } from "@/lib/player-context";
+import { getPlaybackLog, clearPlaybackLog, formatPlaybackLog } from "@/lib/playback-log";
 
 export default function SettingsPage() {
   const { podcasts, subscribe } = useSubscriptions();
   const { showToast } = useToast();
   const { theme, setTheme } = useTheme();
   const { keepScreenOn, setKeepScreenOn, wakeLockSupported } = usePlayer();
+  // Shown when the clipboard is unavailable, so the log can be copied by hand
+  const [playbackLogText, setPlaybackLogText] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [importStatus, setImportStatus] = useState<{
@@ -196,6 +199,58 @@ export default function SettingsPage() {
               />
             </button>
           </div>
+        </div>
+      </section>
+
+      {/* Playback log, for debugging background playback on phones */}
+      <section className="max-w-2xl mb-8">
+        <div className="bg-light-surface dark:bg-zinc-800/50 rounded-xl p-6">
+          <p className="font-medium text-light-text dark:text-white">Playback log</p>
+          <p className="text-sm text-gray-500 dark:text-zinc-400 mt-1">
+            If playback stops when your screen turns off: clear the log, play an episode, turn the
+            screen off for a minute, turn it back on, then copy the log and send it over.
+          </p>
+          <div className="flex gap-3 mt-4">
+            <button
+              onClick={async () => {
+                const entries = getPlaybackLog();
+                if (entries.length === 0) {
+                  showToast("Playback log is empty");
+                  return;
+                }
+                const text = formatPlaybackLog(entries);
+                try {
+                  await navigator.clipboard.writeText(text);
+                  setPlaybackLogText(null);
+                  showToast(`Copied ${entries.length} log entries`);
+                } catch {
+                  setPlaybackLogText(text);
+                  showToast("Couldn't copy automatically - select the log below");
+                }
+              }}
+              className="px-4 py-2 text-sm font-medium rounded-lg bg-light-primary dark:bg-sky-600 text-white hover:bg-light-primary/90 dark:hover:bg-sky-500 transition-colors"
+            >
+              Copy log
+            </button>
+            <button
+              onClick={() => {
+                clearPlaybackLog();
+                setPlaybackLogText(null);
+                showToast("Playback log cleared");
+              }}
+              className="px-4 py-2 text-sm font-medium rounded-lg border border-gray-300 dark:border-zinc-700 text-gray-600 dark:text-zinc-300 hover:text-light-primary dark:hover:text-sky-400 transition-colors"
+            >
+              Clear log
+            </button>
+          </div>
+          {playbackLogText && (
+            <textarea
+              readOnly
+              value={playbackLogText}
+              onFocus={(e) => e.currentTarget.select()}
+              className="mt-4 w-full h-48 p-3 text-xs font-mono rounded-lg bg-white dark:bg-zinc-900 border border-gray-300 dark:border-zinc-700 text-gray-700 dark:text-zinc-300"
+            />
+          )}
         </div>
       </section>
 
