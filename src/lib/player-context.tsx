@@ -142,8 +142,15 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         webkitAudioDecodedByteCount?: number;
         webkitVideoDecodedByteCount?: number;
       };
+      let bufferedAhead = 0;
+      for (let i = 0; i < audio.buffered.length; i++) {
+        if (audio.buffered.start(i) <= audio.currentTime && audio.currentTime <= audio.buffered.end(i)) {
+          bufferedAhead = audio.buffered.end(i) - audio.currentTime;
+        }
+      }
       return {
         t: Math.round(audio.currentTime),
+        ahead: Math.round(bufferedAhead),
         hidden: document.visibilityState === "hidden",
         ready: audio.readyState,
         network: audio.networkState,
@@ -157,7 +164,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     // call) refuses the resume, and we don't retry until the page has been visible again.
     let resumedWhileHidden = false;
     const onVisibilityChange = () => {
-      logPlayback("visibility", { state: document.visibilityState, playing: !audio.paused });
+      logPlayback("visibility", { state: document.visibilityState, playing: !audio.paused, ...mediaInfo() });
       if (document.visibilityState === "visible") resumedWhileHidden = false;
     };
     document.addEventListener("visibilitychange", onVisibilityChange);
@@ -207,7 +214,39 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     };
     saveProgressRef.current = saveProgress;
 
+    // Watchdog for stuck background playback: on some Android phones the audio goes silent
+    // a few seconds after the screen turns off while the element still reports "playing",
+    // and a pause + play (what the media card's buttons do) brings it back. If the position
+    // hasn't moved for 4s while playing in the background, do that pause + play ourselves.
+    let lastPosition = -1;
+    let lastAdvanceAt = Date.now();
+    let lastKickAt = 0;
+    const watchdog = setInterval(() => {
+      const now = Date.now();
+      if (audio.currentTime !== lastPosition || audio.paused || resumePendingRef.current) {
+        lastPosition = audio.currentTime;
+        lastAdvanceAt = now;
+        return;
+      }
+      const stuckFor = now - lastAdvanceAt;
+      if (document.visibilityState !== "hidden" || stuckFor < 4000 || now - lastKickAt < 10000) return;
+      lastKickAt = now;
+      logPlayback("stall-kick", { ...mediaInfo(), stuckSec: Math.round(stuckFor / 1000) });
+      intentionalPauseRef.current = true;
+      audio.pause();
+      audio.play().then(
+        () => logPlayback("stall-kick-ok", mediaInfo()),
+        (e: unknown) => logPlayback("stall-kick-refused", { error: e instanceof Error ? `${e.name}: ${e.message}` : String(e) })
+      );
+    }, 2000);
+
+    let lastHeartbeatAt = 0;
     audio.addEventListener("timeupdate", () => {
+      // While the screen is off, note the position every 5s so gaps show stalls or freezes
+      if (document.visibilityState === "hidden" && Date.now() - lastHeartbeatAt >= 5000) {
+        lastHeartbeatAt = Date.now();
+        logPlayback("heartbeat", mediaInfo());
+      }
       setState((s) => ({ ...s, currentTime: audio.currentTime }));
       if (!audio.paused && Math.abs(audio.currentTime - lastSavedTimeRef.current) >= PROGRESS_SAVE_INTERVAL) {
         saveProgress();
@@ -246,11 +285,20 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         logPlayback("error", { code: audio.error.code, message: audio.error.message });
       }
     });
-    ["stalled", "waiting"].forEach((type) =>
+    ["stalled", "waiting", "playing"].forEach((type) =>
       audio.addEventListener(type, () => logPlayback(type, mediaInfo()))
     );
+    // Downloading in the background: log at most one "progress" per 5s while hidden
+    let lastProgressLogAt = 0;
+    audio.addEventListener("progress", () => {
+      if (document.visibilityState === "hidden" && Date.now() - lastProgressLogAt >= 5000) {
+        lastProgressLogAt = Date.now();
+        logPlayback("download", mediaInfo());
+      }
+    });
 
     return () => {
+      clearInterval(watchdog);
       document.removeEventListener("visibilitychange", onVisibilityChange);
       ["freeze", "resume"].forEach((type) => document.removeEventListener(type, onLifecycle));
       ["pagehide", "pageshow"].forEach((type) => window.removeEventListener(type, onLifecycle));
