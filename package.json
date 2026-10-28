@@ -9,7 +9,8 @@
     "lint": "eslint",
     "security:local": "node scripts/security/show-notes-check.mjs && node scripts/security/internal-address-check.mjs",
     "security:firestore": "node scripts/security/firestore-open-check.mjs",
-    "android:apk": "cap sync android && cd android && JAVA_HOME=${JAVA_HOME:-/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home} ./gradlew assembleDebug"
+    "android:apk": "cap sync android && cd android && JAVA_HOME=${JAVA_HOME:-/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home} ./gradlew assembleDebug",
+    "mac:app": "macos/build.sh"
   },
   "dependencies": {
     "@capacitor/core": "^8.6.0",

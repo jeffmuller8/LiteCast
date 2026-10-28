@@ -1,9 +1,11 @@
 // In the Android app (Capacitor), episodes play through a native Media3 player that keeps going
-// with the screen off and other apps open (android/app/src/main/java/com/litecast/app).
+// with the screen off and other apps open (android/app/src/main/java/com/litecast/app). The Mac
+// app has an AVPlayer equivalent (macos/Sources/AudioPlayer.swift) behind the same interface.
 // NativeAudio mirrors the parts of HTMLAudioElement the player uses, firing the same events,
 // so player-context.tsx drives either one. In a browser none of this is used.
 
 import { Capacitor, registerPlugin, type PluginListenerHandle } from "@capacitor/core";
+import { hasMacPlugin, macPlugin } from "./native-bridge";
 
 export interface NativePlayerState {
   playWhenReady: boolean;
@@ -41,10 +43,12 @@ interface LiteCastAudioPlugin {
   ): Promise<PluginListenerHandle>;
 }
 
-const LiteCastAudio = registerPlugin<LiteCastAudioPlugin>("LiteCastAudio");
+const LiteCastAudio = hasMacPlugin("LiteCastAudio")
+  ? macPlugin<LiteCastAudioPlugin>("LiteCastAudio")
+  : registerPlugin<LiteCastAudioPlugin>("LiteCastAudio");
 
 export function hasNativeAudio() {
-  return Capacitor.isNativePlatform() && Capacitor.isPluginAvailable("LiteCastAudio");
+  return hasMacPlugin("LiteCastAudio") || (Capacitor.isNativePlatform() && Capacitor.isPluginAvailable("LiteCastAudio"));
 }
 
 /** What the player needs from an audio element; HTMLAudioElement and NativeAudio both fit. */
@@ -217,7 +221,7 @@ export class NativeAudio extends EventTarget implements AudioLike {
       this._paused = paused;
       this.dispatchEvent(new Event(paused ? "pause" : "play"));
     }
-    if (s.state !== prevState && (s.state === "buffering" || s.state === "ready")) {
+    if (s.state !== prevState && s.playWhenReady && (s.state === "buffering" || s.state === "ready")) {
       this.dispatchEvent(new Event(s.state === "buffering" ? "waiting" : "playing"));
     }
   }
