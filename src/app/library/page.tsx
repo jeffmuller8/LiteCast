@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { PodcastCard, PodcastListRow } from "@/components/podcast-card";
 import { SortDropdown, type SortOption } from "@/components/sort-dropdown";
+import { AddPodcastLinkButton } from "@/components/add-podcast-link";
 import { useSubscriptions, NewReleasesSortOption } from "@/lib/subscription-context";
 import { Library, Loader2, Clock, Pin, TrendingUp, ArrowUpAZ } from "lucide-react";
 
@@ -35,15 +36,21 @@ export default function LibraryPage() {
   return (
     <div className="p-4 md:p-8 animate-fadeIn">
       {/* Header */}
-      <div className="mb-4 md:mb-6 flex items-end justify-between gap-4">
+      <div className="mb-4 md:mb-6 flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
         <div>
           <h1 className="text-2xl md:text-3xl font-bold text-light-text dark:text-white">Podcast Library</h1>
           <p className="text-gray-500 dark:text-zinc-400 mt-1">
             {podcasts.length} subscription{podcasts.length !== 1 ? "s" : ""}
           </p>
         </div>
-        {podcasts.length > 1 && (
-          <SortDropdown options={SORT_OPTIONS} value={sortBy} onChange={setSortBy} />
+        {/* An empty library shows the button in its empty state instead */}
+        {podcasts.length > 0 && (
+          <div className="flex items-center gap-2 ml-auto">
+            <AddPodcastLinkButton />
+            {podcasts.length > 1 && (
+              <SortDropdown options={SORT_OPTIONS} value={sortBy} onChange={setSortBy} />
+            )}
+          </div>
         )}
       </div>
 
@@ -76,6 +83,7 @@ export default function LibraryPage() {
           <p className="text-gray-400 dark:text-zinc-500 mt-2">
             Search and subscribe to podcasts to build your library
           </p>
+          <AddPodcastLinkButton className="mt-6" />
         </div>
       )}
     </div>

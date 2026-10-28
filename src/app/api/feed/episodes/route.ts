@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
+import { fetchFeedXml } from "@/lib/fetch-feed";
 
 const API_KEY = process.env.PODCASTINDEX_API_KEY || "";
 const API_SECRET = process.env.PODCASTINDEX_API_SECRET || "";
@@ -43,18 +44,7 @@ function extractContent(match: RegExpMatchArray | null): string {
 
 // Fetch and parse RSS feed directly
 async function fetchEpisodesFromRSS(feedUrl: string, maxEpisodes: number) {
-  const response = await fetch(feedUrl, {
-    headers: {
-      "User-Agent": "LiteCast/1.0",
-      Accept: "application/rss+xml, application/xml, text/xml",
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch feed: ${response.status}`);
-  }
-
-  const xml = await response.text();
+  const xml = await fetchFeedXml(feedUrl);
 
   // Parse episodes from <item> elements
   const itemRegex = /<item>([\s\S]*?)<\/item>/g;
@@ -136,6 +126,9 @@ export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const url = searchParams.get("url");
   const limitParam = searchParams.get("limit");
+  // Private feeds are never sent to Podcast Index (it wouldn't have them, and the link
+  // carries the subscriber's access token)
+  const isPrivate = searchParams.get("private") === "1";
 
   if (!url) {
     return NextResponse.json({ error: "URL is required" }, { status: 400 });
@@ -147,10 +140,16 @@ export async function GET(request: NextRequest) {
   try {
     let episodes;
 
-    // Use Podcast Index if credentials are available, otherwise parse RSS directly
-    if (API_KEY && API_SECRET) {
-      episodes = await fetchEpisodesFromPodcastIndex(url, maxEpisodes);
-    } else {
+    // Use Podcast Index for public feeds when configured, falling back to the feed itself
+    // when Podcast Index doesn't know it; private feeds always read the feed directly
+    if (!isPrivate && API_KEY && API_SECRET) {
+      try {
+        episodes = await fetchEpisodesFromPodcastIndex(url, maxEpisodes);
+      } catch (error) {
+        console.warn("Podcast Index lookup failed, reading feed directly:", error instanceof Error ? error.message : error);
+      }
+    }
+    if (!episodes || episodes.length === 0) {
       episodes = await fetchEpisodesFromRSS(url, maxEpisodes);
     }
 

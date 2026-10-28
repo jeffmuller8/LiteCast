@@ -168,6 +168,8 @@ export default function PodcastPage({ params }: { params: Promise<{ id: string }
                 <Pin className={`w-5 h-5 ${isPinned(decodedId) ? "fill-current" : ""}`} />
               </button>
             </Tooltip>
+            {/* A private feed's link carries the subscriber's access token, so it isn't shareable */}
+            {!podcast.isPrivate && (
             <Tooltip content="Copy RSS feed link">
               <button
                 onClick={() => {
@@ -181,6 +183,7 @@ export default function PodcastPage({ params }: { params: Promise<{ id: string }
                 <Share2 className="w-5 h-5" />
               </button>
             </Tooltip>
+            )}
             <button
               onClick={handleUnsubscribe}
               className="flex items-center gap-2 px-5 py-2.5 border border-gray-300 dark:border-zinc-600 text-gray-600 dark:text-zinc-300 rounded-full font-medium hover:border-red-500 dark:hover:border-red-500 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-500/10 dark:hover:bg-red-500/10 transition-colors"

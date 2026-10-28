@@ -1,26 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
+import { fetchFeedXml, privateFeedId, FeedFetchError } from "@/lib/fetch-feed";
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const url = searchParams.get("url");
+  // Private links (with access tokens) get an id that doesn't encode the link itself
+  const isPrivate = searchParams.get("private") === "1";
 
   if (!url) {
     return NextResponse.json({ error: "URL is required" }, { status: 400 });
   }
 
   try {
-    const response = await fetch(url, {
-      headers: {
-        "User-Agent": "LiteCast/1.0",
-        Accept: "application/rss+xml, application/xml, text/xml",
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to fetch feed: ${response.status}`);
+    const xml = await fetchFeedXml(url);
+    if (!/<rss[\s>]|<channel[\s>]/.test(xml)) {
+      return NextResponse.json({ error: "That link isn't a podcast feed" }, { status: 422 });
     }
-
-    const xml = await response.text();
 
     // Parse the RSS feed
     const titleMatch = xml.match(/<title>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/title>/);
@@ -34,7 +29,7 @@ export async function GET(request: NextRequest) {
     const episodeCount = (xml.match(/<item>/g) || []).length;
 
     const podcast = {
-      id: Buffer.from(url).toString("base64"),
+      id: isPrivate ? privateFeedId(url) : Buffer.from(url).toString("base64"),
       title: titleMatch?.[1]?.trim() || "Unknown Podcast",
       author: authorMatch?.[1]?.trim() || "Unknown Author",
       description: descMatch?.[1]?.trim().substring(0, 500) || "",
@@ -45,7 +40,15 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ podcast });
   } catch (error) {
-    console.error("Feed fetch error:", error);
+    console.error("Feed fetch error:", error instanceof Error ? error.message : error);
+    if (error instanceof FeedFetchError) {
+      const message = error.status === 401 || error.status === 403
+        ? "The feed refused access. Check that you copied the whole link."
+        : error.status === 404
+          ? "No feed found at that link"
+          : error.message;
+      return NextResponse.json({ error: message }, { status: 502 });
+    }
     return NextResponse.json(
       { error: "Failed to fetch or parse RSS feed" },
       { status: 500 }

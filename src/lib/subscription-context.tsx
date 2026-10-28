@@ -13,6 +13,7 @@ export interface Podcast {
   artworkUrl: string;
   feedUrl: string;
   subscribedAt?: string; // ISO time; compared against unsubscribe times when syncing devices
+  isPrivate?: boolean; // added from a private link; its feed is never sent to Podcast Index
 }
 
 export interface Episode {
@@ -63,7 +64,7 @@ interface SubscriptionContextType {
   pinnedPodcastIds: string[];
   listeningStats: ListeningStats[];
   isHydrated: boolean;
-  subscribe: (podcast: Podcast, feedUrl: string) => Promise<void>;
+  subscribe: (podcast: Podcast, feedUrl: string) => Promise<boolean>;
   unsubscribe: (podcastId: string) => void;
   isSubscribed: (podcastId: string) => boolean;
   getNewReleases: (sortBy?: NewReleasesSortOption) => Episode[];
@@ -94,6 +95,14 @@ interface FeedEpisode {
   duration?: number;
   publishedAt?: string;
   transcriptUrl?: string;
+}
+
+// Episodes API URL for a feed; private feeds are read directly, never via Podcast Index
+function episodesApiUrl(feedUrl: string, isPrivate?: boolean, limit?: string): string {
+  let url = `/api/feed/episodes?url=${encodeURIComponent(feedUrl)}`;
+  if (isPrivate) url += "&private=1";
+  if (limit) url += `&limit=${limit}`;
+  return url;
 }
 
 // Maps an episode from /api/feed/episodes onto our Episode shape
@@ -406,7 +415,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     const refreshFeed = async (podcast: Podcast) => {
       try {
-        const response = await fetch(`/api/feed/episodes?url=${encodeURIComponent(podcast.feedUrl)}`);
+        const response = await fetch(episodesApiUrl(podcast.feedUrl, podcast.isPrivate));
         const data = await response.json();
         if (cancelled || data.error || !data.episodes?.length) return;
 
@@ -552,15 +561,15 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
   }, [podcasts, episodes, playbackProgress, bookmarkedEpisodeIds, pinnedPodcastIds, listeningStats, unsubscribedAt, isHydrated, authLoading, user, saveToFirestore]);
 
   const subscribe = async (podcast: Podcast, feedUrl: string) => {
-    if (podcasts.some((p) => p.id === podcast.id)) return;
+    if (podcasts.some((p) => p.id === podcast.id)) return true;
 
     try {
-      const response = await fetch(`/api/feed/episodes?url=${encodeURIComponent(feedUrl)}`);
+      const response = await fetch(episodesApiUrl(feedUrl, podcast.isPrivate));
       const data = await response.json();
 
       if (data.error) {
         console.error("Failed to fetch episodes:", data.error);
-        return;
+        return false;
       }
 
       const newPodcast: Podcast = { ...podcast, feedUrl, subscribedAt: new Date().toISOString() };
@@ -568,8 +577,10 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
 
       setPodcasts((prev) => [...prev, newPodcast]);
       setEpisodes((prev) => [...prev, ...newEpisodes]);
+      return true;
     } catch (error) {
       console.error("Failed to subscribe:", error);
+      return false;
     }
   };
 
@@ -746,7 +757,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
 
     try {
       // Fetch all episodes (no limit)
-      const response = await fetch(`/api/feed/episodes?url=${encodeURIComponent(podcast.feedUrl)}&limit=all`);
+      const response = await fetch(episodesApiUrl(podcast.feedUrl, podcast.isPrivate, "all"));
       const data = await response.json();
 
       if (data.error) {
