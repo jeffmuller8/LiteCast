@@ -112,6 +112,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   // Set whenever the app itself pauses or swaps the audio, so a pause we didn't ask
   // for (e.g. Chrome on Android pausing media when the screen turns off) can be told apart
   const intentionalPauseRef = useRef(false);
+  // True only when the user paused (buttons or lock screen), so error recovery never restarts it
+  const userPausedRef = useRef(false);
   const keepScreenOn = useSyncExternalStore(subscribeKeepScreenOn, readKeepScreenOn, () => false);
   const wakeLockSupported = useSyncExternalStore(noSubscribe, () => "wakeLock" in navigator, () => false);
 
@@ -137,20 +139,23 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
     // Snapshot for the playback log. Chrome's decoded-byte counters show whether it is
     // treating the stream as video (videoBytes > 0), which Android pauses in the background.
+    // Seconds of audio buffered past the playhead
+    const bufferedAhead = () => {
+      for (let i = 0; i < audio.buffered.length; i++) {
+        if (audio.buffered.start(i) <= audio.currentTime && audio.currentTime <= audio.buffered.end(i)) {
+          return audio.buffered.end(i) - audio.currentTime;
+        }
+      }
+      return 0;
+    };
     const mediaInfo = () => {
       const media = audio as HTMLAudioElement & {
         webkitAudioDecodedByteCount?: number;
         webkitVideoDecodedByteCount?: number;
       };
-      let bufferedAhead = 0;
-      for (let i = 0; i < audio.buffered.length; i++) {
-        if (audio.buffered.start(i) <= audio.currentTime && audio.currentTime <= audio.buffered.end(i)) {
-          bufferedAhead = audio.buffered.end(i) - audio.currentTime;
-        }
-      }
       return {
         t: Math.round(audio.currentTime),
-        ahead: Math.round(bufferedAhead),
+        ahead: Math.round(bufferedAhead()),
         hidden: document.visibilityState === "hidden",
         ready: audio.readyState,
         network: audio.networkState,
@@ -214,23 +219,70 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     };
     saveProgressRef.current = saveProgress;
 
-    // Watchdog for stuck background playback: on some Android phones the audio goes silent
-    // a few seconds after the screen turns off while the element still reports "playing",
-    // and a pause + play (what the media card's buttons do) brings it back. If the position
-    // hasn't moved for 4s while playing in the background, do that pause + play ourselves.
+    // Reload the current episode's audio and resume at the last good position. This is what
+    // a page reload did on a Pixel when the stream errored out or wedged; pause + play alone
+    // doesn't recover those. Capped at 3 reloads per 5 minutes so a dead link can't loop.
+    let lastGoodTime = 0;
+    let reloadTimes: number[] = [];
+    const reloadAtPosition = (reason: string) => {
+      const episode = trackedEpisodeRef.current;
+      if (!episode || userPausedRef.current) return;
+      const now = Date.now();
+      reloadTimes = reloadTimes.filter((t) => now - t < 5 * 60_000);
+      if (reloadTimes.length >= 3) {
+        logPlayback("reload-giveup", { reason });
+        return;
+      }
+      reloadTimes.push(now);
+      const resumeAt = Math.max(lastGoodTime, audio.currentTime || 0);
+      logPlayback("reload", { reason, resumeAt: Math.round(resumeAt), attempt: reloadTimes.length });
+
+      resumePendingRef.current = true;
+      if (!audio.paused) intentionalPauseRef.current = true;
+      audio.addEventListener(
+        "loadedmetadata",
+        () => {
+          if (resumeAt > 0 && resumeAt < (audio.duration || Infinity) - 1) audio.currentTime = resumeAt;
+          resumePendingRef.current = false;
+          intentionalPauseRef.current = false;
+          audio.play().then(
+            () => logPlayback("reload-ok", mediaInfo()),
+            (e: unknown) => logPlayback("reload-refused", { error: e instanceof Error ? `${e.name}: ${e.message}` : String(e) })
+          );
+        },
+        { once: true }
+      );
+      audio.src = episode.audioUrl;
+      audio.load();
+    };
+
+    // Watchdog for stuck playback. In the background (where some Android phones go silent
+    // while still reporting "playing") it first tries a pause + play, like the media card's
+    // buttons. If the position still hasn't moved 6s later, or a visible player is "playing"
+    // with audio buffered but frozen for 8s, the pipeline is wedged: reload at this spot.
     let lastPosition = -1;
     let lastAdvanceAt = Date.now();
-    let lastKickAt = 0;
+    let kickedAt = 0;
     const watchdog = setInterval(() => {
       const now = Date.now();
       if (audio.currentTime !== lastPosition || audio.paused || resumePendingRef.current) {
         lastPosition = audio.currentTime;
         lastAdvanceAt = now;
+        kickedAt = 0;
         return;
       }
       const stuckFor = now - lastAdvanceAt;
-      if (document.visibilityState !== "hidden" || stuckFor < 4000 || now - lastKickAt < 10000) return;
-      lastKickAt = now;
+      const hidden = document.visibilityState === "hidden";
+      const kickFailed = kickedAt > 0 && now - kickedAt >= 6000;
+      const wedgedVisible = !hidden && stuckFor >= 8000 && audio.readyState >= 3 && bufferedAhead() >= 5;
+      if (kickFailed || wedgedVisible) {
+        kickedAt = 0;
+        lastAdvanceAt = now;
+        reloadAtPosition(kickFailed ? "stuck-after-kick" : "stuck");
+        return;
+      }
+      if (!hidden || stuckFor < 4000 || kickedAt > 0) return;
+      kickedAt = now;
       logPlayback("stall-kick", { ...mediaInfo(), stuckSec: Math.round(stuckFor / 1000) });
       intentionalPauseRef.current = true;
       audio.pause();
@@ -248,6 +300,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         logPlayback("heartbeat", mediaInfo());
       }
       setState((s) => ({ ...s, currentTime: audio.currentTime }));
+      if (!resumePendingRef.current && audio.currentTime > 0) lastGoodTime = audio.currentTime;
       if (!audio.paused && Math.abs(audio.currentTime - lastSavedTimeRef.current) >= PROGRESS_SAVE_INTERVAL) {
         saveProgress();
       }
@@ -268,6 +321,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     });
 
     audio.addEventListener("play", () => {
+      userPausedRef.current = false;
       setState((s) => ({ ...s, isPlaying: true }));
       logPlayback("play", mediaInfo());
     });
@@ -283,6 +337,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       // Clearing src on teardown raises an "Empty src" error; that one isn't a playback problem
       if (audio.error && !audio.error.message.includes("Empty src")) {
         logPlayback("error", { code: audio.error.code, message: audio.error.message });
+        // Network (2) or decode (3) failure mid-episode: reload and resume, backing off
+        const code = audio.error.code;
+        if ((code === 2 || code === 3) && trackedEpisodeRef.current) {
+          setTimeout(() => reloadAtPosition(`error-${code}`), 1000 + reloadTimes.length * 2000);
+        }
       }
     });
     ["stalled", "waiting", "playing"].forEach((type) =>
@@ -331,7 +390,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
     const handlers: [MediaSessionAction, MediaSessionActionHandler][] = [
       ["play", () => { audio()?.play().catch((e) => console.error("Failed to play:", e)); }],
-      ["pause", () => { intentionalPauseRef.current = true; audio()?.pause(); }],
+      ["pause", () => { intentionalPauseRef.current = true; userPausedRef.current = true; audio()?.pause(); }],
       ["seekbackward", (details) => {
         const a = audio();
         if (a) a.currentTime = Math.max(a.currentTime - (details.seekOffset || SKIP_BACK_SECONDS), 0);
@@ -493,6 +552,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
     if (state.isPlaying) {
       intentionalPauseRef.current = true;
+      userPausedRef.current = true;
       audio.pause();
     } else {
       try {
@@ -506,6 +566,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const pause = () => {
     if (audioRef.current) {
       intentionalPauseRef.current = true;
+      userPausedRef.current = true;
       audioRef.current.pause();
     }
   };
