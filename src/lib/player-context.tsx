@@ -3,6 +3,7 @@
 import { createContext, useContext, useState, useRef, useEffect, useSyncExternalStore, ReactNode } from "react";
 import { useSubscriptions } from "./subscription-context";
 import { logPlayback } from "./playback-log";
+import { NativeAudio, hasNativeAudio, type AudioLike } from "./native-audio";
 
 interface Episode {
   id: string;
@@ -92,7 +93,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     isMuted: false,
   });
 
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  // HTML5 audio in a browser; the native player in the Android app
+  const audioRef = useRef<AudioLike | null>(null);
   const playNextRef = useRef<() => void>(() => {});
 
   // Listening position, saved to the subscription store (drives In Progress and resume)
@@ -126,11 +128,106 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     keepScreenOnListeners.forEach((notify) => notify());
   };
 
-  // Initialize audio element. It's attached to the page (hidden) rather than left detached,
-  // so mobile browsers treat it as the page's primary media for background playback.
   useEffect(() => {
-    audioRef.current = new Audio();
-    const audio = audioRef.current;
+    const saveProgressFrom = (audio: AudioLike) => (completed = false) => {
+      const episode = trackedEpisodeRef.current;
+      if (!episode || resumePendingRef.current) return;
+      const time = audio.currentTime;
+      if (!completed && time < 1) return;
+      lastSavedTimeRef.current = time;
+      updateProgressRef.current(episode.id, time, completed);
+    };
+
+    // In the Android app the native player handles background playback, lock-screen controls
+    // and stream recovery itself; this side tracks its state and saves progress.
+    if (hasNativeAudio()) {
+      const audio = new NativeAudio();
+      audioRef.current = audio;
+      const saveProgress = saveProgressFrom(audio);
+      saveProgressRef.current = saveProgress;
+      const info = () => ({
+        t: Math.round(audio.currentTime),
+        native: audio.nativeState,
+        hidden: document.visibilityState === "hidden",
+      });
+
+      let lastHeartbeatAt = 0;
+      audio.addEventListener("timeupdate", () => {
+        // While in the background, note the position every 30s so the log shows playback continuing
+        if (document.visibilityState === "hidden" && Date.now() - lastHeartbeatAt >= 30_000) {
+          lastHeartbeatAt = Date.now();
+          logPlayback("heartbeat", info());
+        }
+        setState((s) => ({ ...s, currentTime: audio.currentTime }));
+        if (!audio.paused && Math.abs(audio.currentTime - lastSavedTimeRef.current) >= PROGRESS_SAVE_INTERVAL) {
+          saveProgress();
+        }
+      });
+      const onDuration = () => setState((s) => ({ ...s, duration: audio.duration || s.duration }));
+      audio.addEventListener("loadedmetadata", onDuration);
+      audio.addEventListener("durationchange", onDuration);
+      audio.addEventListener("ended", () => {
+        logPlayback("ended", info());
+        saveProgress(true);
+        playNextRef.current();
+      });
+      audio.addEventListener("play", () => {
+        setState((s) => ({ ...s, isPlaying: true }));
+        logPlayback("play", info());
+      });
+      audio.addEventListener("pause", () => {
+        setState((s) => ({ ...s, isPlaying: false }));
+        saveProgress();
+        logPlayback("pause", info());
+      });
+      audio.addEventListener("error", () => {
+        logPlayback("error", { code: audio.error?.code ?? null, message: audio.error?.message ?? null });
+      });
+      ["waiting", "playing"].forEach((type) => audio.addEventListener(type, () => logPlayback(type, info())));
+
+      // Pick up an episode that kept playing while the page reloaded
+      audio.sync().then(
+        (native) => {
+          if (trackedEpisodeRef.current || !native.episode || !native.url) return;
+          try {
+            const episode = JSON.parse(native.episode) as Episode;
+            trackedEpisodeRef.current = episode;
+            lastSavedTimeRef.current = native.position;
+            setState((s) => ({
+              ...s,
+              currentEpisode: episode,
+              currentTime: native.position,
+              duration: native.duration > 0 ? native.duration : episode.duration || 0,
+              isPlaying: native.playWhenReady && native.state !== "ended",
+              playbackSpeed: native.speed,
+            }));
+            logPlayback("restore", info());
+          } catch {
+            // Not an episode we can show; leave the player empty
+          }
+        },
+        (e: unknown) => logPlayback("native-unavailable", { error: e instanceof Error ? e.message : String(e) })
+      );
+
+      // Catch up (and save) when the app returns to the foreground
+      const onVisibilityChange = () => {
+        logPlayback("visibility", { state: document.visibilityState, playing: !audio.paused, ...info() });
+        if (document.visibilityState === "visible") {
+          audio.sync().then(() => saveProgress(), () => {});
+        }
+      };
+      document.addEventListener("visibilitychange", onVisibilityChange);
+
+      return () => {
+        document.removeEventListener("visibilitychange", onVisibilityChange);
+        audio.destroy();
+      };
+    }
+
+    // Browser: an HTML5 audio element. It's attached to the page (hidden) rather than left
+    // detached, so mobile browsers treat it as the page's primary media for background playback.
+    const audio = new Audio();
+    audioRef.current = audio;
     audio.preload = "auto";
     audio.setAttribute("playsinline", "");
     audio.style.display = "none";
@@ -209,14 +306,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       audio.addEventListener(type, updatePositionState)
     );
 
-    const saveProgress = (completed = false) => {
-      const episode = trackedEpisodeRef.current;
-      if (!episode || resumePendingRef.current) return;
-      const time = audio.currentTime;
-      if (!completed && time < 1) return;
-      lastSavedTimeRef.current = time;
-      updateProgressRef.current(episode.id, time, completed);
-    };
+    const saveProgress = saveProgressFrom(audio);
     saveProgressRef.current = saveProgress;
 
     // Reload the current episode's audio and resume at the last good position. This is what
@@ -382,9 +472,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
   }, [state.playbackSpeed]);
 
-  // Lock-screen / notification controls (Media Session API)
+  // Lock-screen / notification controls (Media Session API). The Android app's native player
+  // has its own.
   useEffect(() => {
-    if (!("mediaSession" in navigator)) return;
+    if (!("mediaSession" in navigator) || hasNativeAudio()) return;
     const session = navigator.mediaSession;
     const audio = () => audioRef.current;
 
@@ -426,7 +517,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   // Show the current episode's title, show and artwork on the lock screen
   useEffect(() => {
-    if (!("mediaSession" in navigator)) return;
+    if (!("mediaSession" in navigator) || hasNativeAudio()) return;
     const episode = state.currentEpisode;
     navigator.mediaSession.metadata = episode
       ? new MediaMetadata({
@@ -441,7 +532,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }, [state.currentEpisode]);
 
   useEffect(() => {
-    if (!("mediaSession" in navigator)) return;
+    if (!("mediaSession" in navigator) || hasNativeAudio()) return;
     navigator.mediaSession.playbackState = state.currentEpisode
       ? state.isPlaying ? "playing" : "paused"
       : "none";
@@ -481,7 +572,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   // Loads an episode into the audio element, saving the outgoing episode's position first
   // and resuming the new one where it was left off. Returns the resume time.
-  const loadEpisode = (audio: HTMLAudioElement, episode: Episode) => {
+  const loadEpisode = (audio: AudioLike, episode: Episode) => {
     saveProgressRef.current();
 
     const saved = playbackProgressRef.current.find(
@@ -494,14 +585,27 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     if (!audio.paused) intentionalPauseRef.current = true;
     lastSavedTimeRef.current = resumeAt;
 
-    const finishResume = () => {
-      if (resumeAt > 0 && resumeAt < (audio.duration || Infinity) - 5) {
-        audio.currentTime = resumeAt;
-      }
+    if (audio instanceof NativeAudio) {
+      // The native player starts at the saved spot itself
+      audio.setTrack({
+        id: episode.id,
+        title: episode.title,
+        artist: episode.podcastTitle,
+        artworkUrl: episode.podcastArtworkUrl,
+        startAt: resumeAt,
+        json: JSON.stringify(episode),
+      });
       resumePendingRef.current = false;
-    };
-    audio.addEventListener("loadedmetadata", finishResume, { once: true });
-    audio.addEventListener("error", () => { resumePendingRef.current = false; }, { once: true });
+    } else {
+      const finishResume = () => {
+        if (resumeAt > 0 && resumeAt < (audio.duration || Infinity) - 5) {
+          audio.currentTime = resumeAt;
+        }
+        resumePendingRef.current = false;
+      };
+      audio.addEventListener("loadedmetadata", finishResume, { once: true });
+      audio.addEventListener("error", () => { resumePendingRef.current = false; }, { once: true });
+    }
 
     try {
       const url = new URL(episode.audioUrl);

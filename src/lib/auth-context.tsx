@@ -3,11 +3,14 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
 import {
   User,
+  GoogleAuthProvider,
   onAuthStateChanged,
+  signInWithCredential,
   signInWithPopup,
   signOut as firebaseSignOut,
 } from "firebase/auth";
 import { auth, googleProvider } from "./firebase";
+import { hasNativeAuth, nativeGoogleSignIn, nativeSignOut } from "./native-auth";
 
 interface AuthContextType {
   user: User | null;
@@ -43,7 +46,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
     try {
-      await signInWithPopup(auth, googleProvider);
+      if (hasNativeAuth()) {
+        // Google blocks its sign-in page in the Android app's WebView; sign in natively instead
+        const idToken = await nativeGoogleSignIn();
+        if (!idToken) return; // Cancelled
+        await signInWithCredential(auth, GoogleAuthProvider.credential(idToken));
+      } else {
+        await signInWithPopup(auth, googleProvider);
+      }
     } catch (error) {
       console.error("Error signing in with Google:", error);
       throw error;
@@ -57,6 +67,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     try {
       await firebaseSignOut(auth);
+      if (hasNativeAuth()) await nativeSignOut();
     } catch (error) {
       console.error("Error signing out:", error);
       throw error;

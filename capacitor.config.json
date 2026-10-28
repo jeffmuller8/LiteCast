@@ -1,0 +1,17 @@
+{
+  "appId": "com.litecast.app",
+  "appName": "LiteCast",
+  "webDir": "capacitor-www",
+  "server": {
+    "url": "https://litecast-zeta.vercel.app",
+    "androidScheme": "https"
+  },
+  "android": {
+    "backgroundColor": "#09090b"
+  },
+  "plugins": {
+    "LiteCastAuth": {
+      "webClientId": ""
+    }
+  }
+}

@@ -8,9 +8,11 @@
     "start": "next start",
     "lint": "eslint",
     "security:local": "node scripts/security/show-notes-check.mjs && node scripts/security/internal-address-check.mjs",
-    "security:firestore": "node scripts/security/firestore-open-check.mjs"
+    "security:firestore": "node scripts/security/firestore-open-check.mjs",
+    "android:apk": "cap sync android && cd android && JAVA_HOME=${JAVA_HOME:-/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home} ./gradlew assembleDebug"
   },
   "dependencies": {
+    "@capacitor/core": "^8.6.0",
     "dompurify": "^3.4.17",
     "firebase": "^13.0.0",
     "lucide-react": "^1.55.0",
@@ -19,6 +21,8 @@
     "react-dom": "19.3.0"
   },
   "devDependencies": {
+    "@capacitor/android": "^8.6.0",
+    "@capacitor/cli": "^8.6.0",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
