@@ -47,7 +47,8 @@ export async function GET(request: NextRequest) {
         : error.status === 404
           ? "No feed found at that link"
           : error.message;
-      return NextResponse.json({ error: message }, { status: 502 });
+      // 400 when the link itself was refused (e.g. an internal address); 502 when the feed's server failed
+      return NextResponse.json({ error: message }, { status: error.status === 400 ? 400 : 502 });
     }
     return NextResponse.json(
       { error: "Failed to fetch or parse RSS feed" },

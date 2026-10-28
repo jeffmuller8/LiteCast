@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { safeFetch, BlockedUrlError } from "@/lib/safe-fetch";
 
 interface TranscriptSegment {
   start: number; // seconds
@@ -124,7 +125,8 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const response = await fetch(url, {
+    // Transcript URLs come from feeds, so only public addresses are fetched
+    const response = await safeFetch(url, {
       headers: {
         "User-Agent": "LiteCast/1.0",
         Accept: "text/plain, application/json, text/vtt, text/srt, */*",
@@ -158,6 +160,9 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ segments });
   } catch (error) {
+    if (error instanceof BlockedUrlError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     console.error("Transcript fetch error:", error);
     return NextResponse.json(
       { error: "Failed to fetch or parse transcript" },

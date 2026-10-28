@@ -1,0 +1,16 @@
+rules_version = '2';
+
+// LiteCast stores one document per user at users/{uid} (podcasts, progress, bookmarks...).
+// Only the signed-in owner can read or write their own document; everything else is denied.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Deny anything not matched above
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

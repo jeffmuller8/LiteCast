@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { safeFetch, BlockedUrlError } from "./safe-fetch";
 
 // Server-side RSS fetch shared by the feed API routes.
 // Private podcast links (Patreon, Supercast, Substack...) sometimes embed a username and
@@ -33,7 +34,13 @@ export async function fetchFeedXml(feedUrl: string): Promise<string> {
     url.password = "";
   }
 
-  const response = await fetch(url, { headers, cache: "no-store" });
+  let response: Response;
+  try {
+    response = await safeFetch(url, { headers, cache: "no-store" });
+  } catch (error) {
+    if (error instanceof BlockedUrlError) throw new FeedFetchError(error.message, 400);
+    throw error;
+  }
   if (!response.ok) {
     throw new FeedFetchError(`Failed to fetch feed: ${response.status}`, response.status);
   }

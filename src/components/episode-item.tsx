@@ -8,6 +8,7 @@ import { Play, Pause, Download, MoreHorizontal, Bookmark, BookmarkCheck, ListPlu
 import { usePlayer } from "@/lib/player-context";
 import { useSubscriptions } from "@/lib/subscription-context";
 import { useToast } from "@/components/toast";
+import { sanitizeShowNotes } from "@/lib/sanitize-html";
 
 interface Episode {
   id: string;
@@ -66,41 +67,6 @@ function stripHtml(html: string): string {
     .replace(/&#39;/g, "'") // Replace &#39; with '
     .replace(/\s+/g, " ") // Collapse multiple spaces
     .trim();
-}
-
-// Sanitize HTML for safe rendering (allows basic formatting)
-function sanitizeHtml(html: string): string {
-  // First decode HTML entities
-  let sanitized = html
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'");
-
-  // Remove potentially dangerous attributes and tags
-  // Keep only safe tags: a, p, br, strong, em, b, i, ul, ol, li, span
-  const allowedTags = ['a', 'p', 'br', 'strong', 'em', 'b', 'i', 'ul', 'ol', 'li', 'span', 'div'];
-
-  // Remove script, style, iframe, and other dangerous tags entirely
-  sanitized = sanitized.replace(/<(script|style|iframe|object|embed|form|input)[^>]*>[\s\S]*?<\/\1>/gi, '');
-  sanitized = sanitized.replace(/<(script|style|iframe|object|embed|form|input)[^>]*\/?>/gi, '');
-
-  // Remove event handlers (onclick, onerror, etc.)
-  sanitized = sanitized.replace(/\s*on\w+\s*=\s*["'][^"']*["']/gi, '');
-  sanitized = sanitized.replace(/\s*on\w+\s*=\s*[^\s>]*/gi, '');
-
-  // Sanitize href attributes - remove javascript: and data: URLs
-  sanitized = sanitized.replace(/href\s*=\s*["']\s*(javascript|data|vbscript):[^"']*["']/gi, 'href="#"');
-
-  // Add target="_blank" and rel="noopener" to all links for safety
-  sanitized = sanitized.replace(/<a\s+([^>]*?)href=/gi, '<a $1target="_blank" rel="noopener noreferrer" href=');
-
-  // Style links with primary color
-  sanitized = sanitized.replace(/<a\s/gi, '<a class="text-light-primary dark:text-sky-400 hover:text-light-primary/80 dark:hover:text-sky-300 underline" ');
-
-  return sanitized;
 }
 
 export function EpisodeItem({
@@ -361,7 +327,7 @@ export function EpisodeItem({
               }
             }}
             className="mt-3 text-sm text-gray-500 dark:text-zinc-400 cursor-pointer hover:text-gray-600 dark:hover:text-zinc-300 transition-colors [&_p]:my-2 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:ml-4 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:ml-4 [&_li]:my-1 [&_br]:my-1 [&_strong]:font-semibold [&_em]:italic"
-            dangerouslySetInnerHTML={{ __html: sanitizeHtml(episode.description) }}
+            dangerouslySetInnerHTML={{ __html: sanitizeShowNotes(episode.description) }}
           />
           <button
             onClick={() => setIsExpanded(false)}
