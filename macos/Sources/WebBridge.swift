@@ -40,7 +40,7 @@ final class WebBridge: NSObject, WKScriptMessageHandlerWithReply, WKNavigationDe
 
         let config = WKWebViewConfiguration()
         config.mediaTypesRequiringUserActionForPlayback = []
-        config.applicationNameForUserAgent = "LiteCastMac/0.1"
+        config.applicationNameForUserAgent = "CastLiteMac/0.1"
         let controller = config.userContentController
         controller.addUserScript(WKUserScript(source: Self.bridgeScript, injectionTime: .atDocumentStart, forMainFrameOnly: true))
 
@@ -187,7 +187,7 @@ final class WebBridge: NSObject, WKScriptMessageHandlerWithReply, WKNavigationDe
         let html = """
         <html><body style="margin:0;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;
         background:#09090b;color:#fafafa;font-family:-apple-system,sans-serif;text-align:center;padding:16px">
-        <p>LiteCast couldn't reach the internet.</p>
+        <p>Cast Lite couldn't reach the internet.</p>
         <p><a href="\(site.absoluteString)" style="color:#38bdf8">Try again</a></p></body></html>
         """
         webView.loadHTMLString(html, baseURL: nil)

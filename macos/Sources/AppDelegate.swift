@@ -5,7 +5,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var bridge: WebBridge!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let siteString = Bundle.main.object(forInfoDictionaryKey: "LiteCastURL") as? String ?? "https://litecast-zeta.vercel.app"
+        let siteString = Bundle.main.object(forInfoDictionaryKey: "LiteCastURL") as? String ?? "https://castlite.app"
         let site = URL(string: siteString)!
 
         bridge = WebBridge(site: site)
@@ -16,7 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
-        window.title = "LiteCast"
+        window.title = "Cast Lite"
         window.minSize = NSSize(width: 420, height: 560)
         window.contentView = bridge.webView
         window.delegate = self
@@ -64,15 +64,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let main = NSMenu()
 
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "About LiteCast", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(withTitle: "About Cast Lite", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Hide LiteCast", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        appMenu.addItem(withTitle: "Hide Cast Lite", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         let hideOthers = appMenu.addItem(withTitle: "Hide Others", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
         hideOthers.keyEquivalentModifierMask = [.command, .option]
         appMenu.addItem(withTitle: "Show All", action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Quit LiteCast", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        main.addItem(submenu: appMenu, title: "LiteCast")
+        appMenu.addItem(withTitle: "Quit Cast Lite", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        main.addItem(submenu: appMenu, title: "Cast Lite")
 
         // Without these the standard shortcuts (copy, paste, select all) don't reach the page
         let editMenu = NSMenu(title: "Edit")
@@ -96,7 +96,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         windowMenu.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
         windowMenu.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
         windowMenu.addItem(.separator())
-        let show = windowMenu.addItem(withTitle: "LiteCast", action: #selector(showMainWindow(_:)), keyEquivalent: "0")
+        let show = windowMenu.addItem(withTitle: "Cast Lite", action: #selector(showMainWindow(_:)), keyEquivalent: "0")
         show.target = self
         main.addItem(submenu: windowMenu, title: "Window")
         NSApp.windowsMenu = windowMenu

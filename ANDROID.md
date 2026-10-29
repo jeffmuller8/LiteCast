@@ -1,7 +1,7 @@
-# LiteCast for Android
+# Cast Lite for Android
 
 The Android app is a Capacitor shell around the deployed web app (`server.url` in
-`capacitor.config.json` points at https://litecast-zeta.vercel.app), so every screen is the
+`capacitor.config.json` points at https://castlite.app), so every screen is the
 web UI. Two pieces are native:
 
 - **Playback**: `PlaybackService` (Media3 ExoPlayer in a foreground `MediaSessionService`) plays
@@ -36,7 +36,7 @@ The APK lands at `android/app/build/outputs/apk/debug/app-debug.apk`.
 ## One-time setup for Google sign-in
 
 1. Firebase console → project **litecast-c7d80** → Project settings → General → **Add app** →
-   Android. Package name `com.litecast.app`, nickname LiteCast Android, and the debug SHA-1
+   Android. Package name `com.litecast.app`, nickname Cast Lite Android, and the debug SHA-1
    below. Download of `google-services.json` isn't needed; skip that step.
 2. Get the SHA-1 of this Mac's debug key (the APK is signed with it):
 

@@ -1,4 +1,4 @@
-# LiteCast for macOS
+# Cast Lite for macOS
 
 A small native Swift app (no Xcode project needed) that shows the deployed web app in a
 WKWebView, so every screen is the web UI, like the Android app. Two pieces are native:
@@ -22,7 +22,7 @@ quit with ⌘Q. Web changes reach the app once they're deployed to Vercel.
 npm run mac:app
 ```
 
-Produces `macos/build/LiteCast.app` and `macos/build/LiteCast.dmg` (universal, ad-hoc signed).
+Produces `macos/build/Cast Lite.app` and `macos/build/CastLite.dmg` (universal, ad-hoc signed).
 Only the Xcode command-line tools are needed. To try local web changes in the app, build it
 against the dev server: `LITECAST_URL=http://localhost:3000 macos/build.sh`.
 

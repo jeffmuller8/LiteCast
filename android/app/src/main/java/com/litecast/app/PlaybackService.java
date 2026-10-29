@@ -35,7 +35,7 @@ public class PlaybackService extends MediaSessionService {
         // Podcast hosts often redirect through tracking prefixes that switch between http and https
         DefaultHttpDataSource.Factory http = new DefaultHttpDataSource.Factory()
             .setAllowCrossProtocolRedirects(true)
-            .setUserAgent("LiteCast/1.0 (Android)");
+            .setUserAgent("CastLite/1.0 (Android)");
 
         ExoPlayer player = new ExoPlayer.Builder(this)
             .setMediaSourceFactory(new DefaultMediaSourceFactory(new DefaultDataSource.Factory(this, http)))

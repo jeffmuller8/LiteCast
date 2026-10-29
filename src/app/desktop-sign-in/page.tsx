@@ -42,19 +42,19 @@ export default function DesktopSignInPage() {
 
   return (
     <div className="p-8 max-w-md mx-auto mt-16 text-center">
-      <h1 className="text-2xl font-bold mb-3 text-light-text dark:text-white">Sign in to the LiteCast Mac app</h1>
+      <h1 className="text-2xl font-bold mb-3 text-light-text dark:text-white">Sign in to the Cast Lite Mac app</h1>
       {state === null ? (
         <p className="text-gray-600 dark:text-zinc-400">
-          This link has expired. Choose Sign in with Google in the LiteCast app to start again.
+          This link has expired. Choose Sign in with Google in the Cast Lite app to start again.
         </p>
       ) : status === "done" ? (
         <p className="text-gray-600 dark:text-zinc-400">
-          You&apos;re signed in. Switch back to LiteCast; you can close this tab.
+          You&apos;re signed in. Switch back to Cast Lite; you can close this tab.
         </p>
       ) : (
         <>
           <p className="text-gray-600 dark:text-zinc-400 mb-6">
-            Sign in with Google here and LiteCast will pick it up.
+            Sign in with Google here and Cast Lite will pick it up.
           </p>
           <button
             onClick={signIn}

@@ -1,13 +1,14 @@
 #!/bin/bash
-# Builds LiteCast.app (universal, ad-hoc signed) and LiteCast.dmg into macos/build.
+# Builds "Cast Lite.app" (universal, ad-hoc signed) and CastLite.dmg into macos/build.
 # Needs only the Xcode command-line tools. To test local web changes, point the app at the dev
 # server: LITECAST_URL=http://localhost:3000 macos/build.sh
 set -euo pipefail
 cd "$(dirname "$0")"
 
 OUT=build
-APP="$OUT/LiteCast.app"
-rm -rf "$APP" "$OUT/dmg" "$OUT/LiteCast.dmg"
+APP="$OUT/Cast Lite.app"
+DMG="$OUT/CastLite.dmg"
+rm -rf "$APP" "$OUT/dmg" "$DMG"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 if [ ! -f AppIcon.icns ]; then
@@ -32,7 +33,7 @@ codesign --force --sign - "$APP"
 mkdir -p "$OUT/dmg"
 cp -R "$APP" "$OUT/dmg/"
 ln -s /Applications "$OUT/dmg/Applications"
-hdiutil create -quiet -volname LiteCast -srcfolder "$OUT/dmg" -ov -format UDZO "$OUT/LiteCast.dmg"
+hdiutil create -quiet -volname "Cast Lite" -srcfolder "$OUT/dmg" -ov -format UDZO "$DMG"
 rm -rf "$OUT/dmg"
 
-echo "Built $PWD/$APP and $PWD/$OUT/LiteCast.dmg"
+echo "Built $PWD/$APP and $PWD/$DMG"

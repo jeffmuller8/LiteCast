@@ -261,7 +261,7 @@ final class AudioPlayer: NSObject {
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: title,
             MPMediaItemPropertyArtist: artist,
-            MPMediaItemPropertyAlbumTitle: "LiteCast",
+            MPMediaItemPropertyAlbumTitle: "Cast Lite",
             MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.audio.rawValue,
             MPNowPlayingInfoPropertyElapsedPlaybackTime: max(0, player.currentTime().seconds),
             MPNowPlayingInfoPropertyPlaybackRate: player.timeControlStatus == .playing ? Double(speed) : 0,

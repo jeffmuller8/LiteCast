@@ -1,9 +1,9 @@
 {
   "appId": "com.litecast.app",
-  "appName": "LiteCast",
+  "appName": "Cast Lite",
   "webDir": "capacitor-www",
   "server": {
-    "url": "https://litecast-zeta.vercel.app",
+    "url": "https://castlite.app",
     "androidScheme": "https"
   },
   "android": {
