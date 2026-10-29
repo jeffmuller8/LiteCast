@@ -3,7 +3,7 @@
   "appName": "Cast Lite",
   "webDir": "capacitor-www",
   "server": {
-    "url": "https://castlite.app",
+    "url": "https://app.castlite.app",
     "androidScheme": "https"
   },
   "android": {

@@ -1,7 +1,7 @@
 # Cast Lite for Android
 
 The Android app is a Capacitor shell around the deployed web app (`server.url` in
-`capacitor.config.json` points at https://castlite.app), so every screen is the
+`capacitor.config.json` points at https://app.castlite.app), so every screen is the
 web UI. Two pieces are native:
 
 - **Playback**: `PlaybackService` (Media3 ExoPlayer in a foreground `MediaSessionService`) plays

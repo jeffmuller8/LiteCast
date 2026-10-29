@@ -5,7 +5,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var bridge: WebBridge!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let siteString = Bundle.main.object(forInfoDictionaryKey: "LiteCastURL") as? String ?? "https://castlite.app"
+        let siteString = Bundle.main.object(forInfoDictionaryKey: "LiteCastURL") as? String ?? "https://app.castlite.app"
         let site = URL(string: siteString)!
 
         bridge = WebBridge(site: site)
